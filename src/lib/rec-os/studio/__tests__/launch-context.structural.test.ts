@@ -80,6 +80,14 @@ async function main() {
     assert(!url.includes("briefing") && !url.includes("copy"), "nunca carrega conteúdo de briefing/copy na URL");
   }
 
+  console.log("[test] [PROMPT 26 -- TEST 07] parseStudioLaunchContext sanitiza return_to -- nunca aceita redirect aberto");
+  {
+    const external = parseStudioLaunchContext({ return_to: "https://evil.example.com" });
+    assert(external.returnRoute === "/admin/contentos/criar", "return_to externo rejeitado, cai pro fallback interno seguro");
+    const internal = parseStudioLaunchContext({ return_to: "/admin/contentos/criar?client=c1" });
+    assert(internal.returnRoute === "/admin/contentos/criar?client=c1", "return_to interno válido preservado");
+  }
+
   console.log("[test] Prompt 24 -- buildSeriesWorkspaceUrl sem nenhum contexto extra ainda produz uma URL limpa");
   {
     const url = buildSeriesWorkspaceUrl("series-2", { clientId: null, contentId: null, campaignId: null, socialProfileId: null, format: null, returnRoute: "/admin/contentos/criar" });

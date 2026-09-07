@@ -90,6 +90,41 @@ async function main() {
     assert(/navigate\(`\/admin\/contentos\/editor-os/.test(source), "Abrir no EditorOS navega via prop `navigate`, nunca router direto");
   }
 
+  console.log("[test] [PROMPT 26 -- FASE 04/05/34/35] Download/EditorOS/Usar no conteúdo SEMPRE resolvem o ativo canônico via endpoint dedicado, nunca a partir de item.image.url em memória");
+  {
+    assert(/fetch\(`\/api\/rec-os\/series\/\$\{seriesId\}\/items\/\$\{itemId\}\/asset/.test(source), "resolveCanonicalAsset chama o endpoint dedicado de resolução de ativo");
+    assert(/async function handleDownload/.test(source), "existe uma ação explícita de Download");
+    const downloadBody = extractFunctionBody(source, "async function handleDownload(item: CreativeSeriesItem)");
+    assert(/resolveCanonicalAsset\(item\.id\)/.test(downloadBody), "Download resolve o ativo canônico (nunca usa item.image.url direto)");
+  }
+
+  console.log("[test] [PROMPT 26 -- FASE 01/09] Abrir no EditorOS é mínimo pra qualquer item ready Company-scoped (nunca gated por contentId real), Usar no conteúdo continua exigindo contentId real");
+  {
+    assert(/const canOpenInEditor = Boolean\(clientId\)/.test(source), "EditorOS só depende de clientId (Company), nunca de contentId -- ação mínima (FASE 01)");
+    assert(/const canUseInContent = isStudioLaunchedFromCreate\(launchContext\)/.test(source), "Usar no conteúdo continua exigindo contentId real (FASE 15-22)");
+    const editorBody = extractFunctionBody(source, "async function handleOpenInEditor(item: CreativeSeriesItem)");
+    assert(/seriesItemTransportContentId\(seriesId, item\.id\)/.test(editorBody), "usa id de transporte sintético quando não há contentId real -- reaproveita o mecanismo existente (FASE 09/19), nunca um EditorHandoffV2");
+  }
+
+  console.log("[test] [PROMPT 26 -- FASE 36] Usar no conteúdo envia content_id pro servidor validar (nunca confia no UUID sozinho)");
+  {
+    const useInContentBody = extractFunctionBody(source, "async function handleUseInContent(item: CreativeSeriesItem)");
+    assert(/resolveCanonicalAsset\(item\.id, launchContext\.contentId\)/.test(useInContentBody), "content_id é repassado pro endpoint (que valida server-side contra a Company da série)");
+  }
+
+  console.log("[test] [PROMPT 26 -- FASE 22] handoffs (EditorOS/Usar no conteúdo) nunca chamam o endpoint de geração -- 0 chamadas ao provider");
+  {
+    const editorBody = extractFunctionBody(source, "async function handleOpenInEditor(item: CreativeSeriesItem)");
+    const useInContentBody = extractFunctionBody(source, "async function handleUseInContent(item: CreativeSeriesItem)");
+    assert(!/studio\/images\/generate/.test(editorBody), "handleOpenInEditor nunca chama /api/studio/images/generate");
+    assert(!/studio\/images\/generate/.test(useInContentBody), "handleUseInContent nunca chama /api/studio/images/generate");
+  }
+
+  console.log("[test] [PROMPT 26 -- FASE 02] menu de ações e ver peça só existem pra itens ready com asset válido");
+  {
+    assert(/item\.status === "ready" && item\.visualAssetId/.test(source), "menu de ações condicionado a ready + visual_asset_id -- nunca planned/generating/error/canceled");
+  }
+
   console.log(`\n[result] ${passed} passed, ${failed} failed`);
   if (failed > 0) process.exit(1);
 }

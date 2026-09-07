@@ -21,9 +21,24 @@
  * -- mantém este componente 100% props-driven e montável em qualquer
  * harness de teste (inclusive jsdom, ver __tests__/*.dom.test.tsx) sem
  * precisar mockar o App Router.
+ *
+ * Prompt 26 (Dedicated Series Workspace Completion) — as três "portas
+ * de saída" de um item ready (Baixar, Abrir no EditorOS, Usar no
+ * conteúdo) SEMPRE resolvem o ativo através de
+ * `GET .../items/[itemId]/asset` (FASE 04/05/34/35): nunca a `image.url`
+ * já em memória (pode ter sido resolvida minutos atrás), nunca um
+ * `visual_asset_id` inventado no cliente -- o servidor valida
+ * série -> item -> asset a cada chamada e gera uma signed URL nova.
+ * "Abrir no EditorOS" é uma ação MÍNIMA disponível pra qualquer item
+ * ready de uma série Company-scoped (não depende de a série ter
+ * nascido do Criar -- usa um id de transporte sintético quando não há
+ * `contentId` real, FASE 01/09/19); Free Mode não oferece EditorOS
+ * porque o próprio EditorOS exige uma Company pra abrir (arquitetura
+ * congelada, não alterada aqui). "Usar no conteúdo" continua exigindo
+ * um `contentId` REAL (FASE 15-22).
  */
 import { useState } from "react";
-import { Loader2, RefreshCw, XCircle, Sparkles, AlertTriangle, Grid3x3, RotateCcw, Wand2, ArrowRight, PenLine } from "lucide-react";
+import { Loader2, RefreshCw, XCircle, Sparkles, AlertTriangle, Grid3x3, RotateCcw, Wand2, ArrowRight, PenLine, MoreHorizontal, Eye, Download, X } from "lucide-react";
 import type { DesignFormat } from "@/lib/providers/shared/types";
 import { runSeriesGeneration, cancelPendingItems } from "@/lib/rec-os/studio/series/series-orchestrator";
 import type { CreativeSeriesItem } from "@/lib/rec-os/studio/series/types";
@@ -32,6 +47,7 @@ import { resolveFeedTemporalContext } from "@/lib/rec-os/social-profile/feed-tim
 import type { FeedTimelineItem } from "@/lib/rec-os/social-profile/feed-timeline";
 import type { StudioLaunchContext } from "@/lib/rec-os/studio/launch-context";
 import { isStudioLaunchedFromCreate } from "@/lib/rec-os/studio/launch-context";
+import { seriesItemTransportContentId } from "@/lib/rec-os/studio/series/item-transport-id";
 import { writeVisualImportSession } from "@/lib/rec-os-workflow/visual-import-session";
 import { buildEditorAssetHandoff, validateEditorAssetHandoff, serializeEditorAssetHandoff } from "@/lib/rec-os-workflow/editor-handoff";
 
@@ -45,6 +61,15 @@ interface ItemPatchResponse {
   error?: string;
   assetId?: string | null;
   signedUrl?: string | null;
+}
+interface CanonicalAssetResponse {
+  ok: boolean;
+  error?: string;
+  signedUrl?: string;
+  mimeType?: string;
+  fileName?: string;
+  width?: number;
+  height?: number;
 }
 
 /** Fase "REGRA ABSOLUTA": cada item é um request independente ao MESMO endpoint da peça única, nunca "uma imagem com N variações". Referências/assets protegidos efêmeros não sobrevivem à navegação pro workspace (mesma limitação já existente hoje em qualquer refresh -- não é uma regressão desta rota, ver relatório). */
@@ -107,8 +132,12 @@ export function SeriesWorkspacePanel({ seriesId, initialItems, clientId, skillId
   const [regenerateError, setRegenerateError] = useState<{ id: string; message: string } | null>(null);
   const [showFeedPreview, setShowFeedPreview] = useState(false);
   const [handoffMessage, setHandoffMessage] = useState<string | null>(null);
+  const [openActionsFor, setOpenActionsFor] = useState<string | null>(null);
+  const [previewItem, setPreviewItem] = useState<CreativeSeriesItem | null>(null);
+  const [pendingActionId, setPendingActionId] = useState<string | null>(null);
   const canceledIds = useState(() => new Set<string>())[0];
-  const canHandoff = isStudioLaunchedFromCreate(launchContext);
+  const canUseInContent = isStudioLaunchedFromCreate(launchContext);
+  const canOpenInEditor = Boolean(clientId); // FASE 01/09 -- mínimo pra qualquer item ready Company-scoped; EditorOS (arquitetura congelada) sempre exige uma Company, então Free Mode nunca oferece esta ação.
 
   function applyUpdate(next: CreativeSeriesItem) {
     setItems((prev) => prev.map((i) => (i.id === next.id ? next : i)));
@@ -214,11 +243,51 @@ export function SeriesWorkspacePanel({ seriesId, initialItems, clientId, skillId
     void generateOneItemPersisted(item);
   }
 
-  /** Fase 37-39 -- handoff de um item ready: mesmo mecanismo já usado pela peça única (rec-os-workflow/visual-import-session.ts), nunca um segundo canal. */
-  async function writeItemToSession(item: CreativeSeriesItem): Promise<boolean> {
-    if (!item.image || !launchContext.clientId || !launchContext.contentId) return false;
+  /**
+   * Fase 04/05/34/35 -- ATIVO CANÔNICO: sempre resolvido no momento da
+   * ação (nunca a `image.url` já em memória), sob RLS, nunca aceitando
+   * um `visual_asset_id` vindo do cliente (só seriesId+itemId). Usado
+   * pelas três portas de saída (Download/EditorOS/Usar no conteúdo).
+   */
+  async function resolveCanonicalAsset(itemId: string, contentId?: string | null): Promise<CanonicalAssetResponse> {
     try {
-      const res = await fetch(item.image.url);
+      const qs = contentId ? `?content_id=${encodeURIComponent(contentId)}` : "";
+      const res = await fetch(`/api/rec-os/series/${seriesId}/items/${itemId}/asset${qs}`);
+      const data = (await res.json().catch(() => null)) as CanonicalAssetResponse | null;
+      if (!res.ok || !data?.ok) return { ok: false, error: data?.error ?? "Não foi possível preparar este ativo agora." };
+      return data;
+    } catch {
+      return { ok: false, error: "Não foi possível conectar ao servidor." };
+    }
+  }
+
+  /** Fase 06/07/08 -- baixa o ativo canônico (nunca a thumbnail/data URL antiga): nome humano, MIME real preservado, full resolution. */
+  async function handleDownload(item: CreativeSeriesItem) {
+    setHandoffMessage(null);
+    setPendingActionId(item.id);
+    const asset = await resolveCanonicalAsset(item.id);
+    setPendingActionId(null);
+    if (!asset.ok || !asset.signedUrl) { setHandoffMessage(asset.error ?? "Não foi possível baixar esta peça agora."); return; }
+    try {
+      const res = await fetch(asset.signedUrl);
+      const blob = await res.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = blobUrl;
+      a.download = asset.fileName ?? `serie-${seriesId}-peca-${item.position}.jpg`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(blobUrl);
+    } catch {
+      setHandoffMessage("Não foi possível baixar esta peça agora.");
+    }
+  }
+
+  /** Fase 20 -- prefere a identidade do ativo persistido (nunca reconverte um JPEG persistido em base64 gigante à toa): o data URL só existe efemeramente pra alimentar o canal de sessionStorage que o EditorOS/Criar já leem (FASE 09/19 -- reusa o mecanismo existente, nunca um segundo protocolo). */
+  async function writeAssetToSession(clientIdForSession: string, contentIdForSession: string, asset: CanonicalAssetResponse & { ok: true; signedUrl: string }): Promise<boolean> {
+    try {
+      const res = await fetch(asset.signedUrl);
       const blob = await res.blob();
       const dataUrl: string = await new Promise((resolve, reject) => {
         const reader = new FileReader();
@@ -226,38 +295,49 @@ export function SeriesWorkspacePanel({ seriesId, initialItems, clientId, skillId
         reader.onerror = () => reject(reader.error);
         reader.readAsDataURL(blob);
       });
-      const result = writeVisualImportSession(launchContext.clientId, launchContext.contentId, {
-        fileName: `studio-vidigal-${new Date().toISOString().slice(0, 10)}.${blob.type === "image/png" ? "png" : "jpg"}`,
-        mimeType: blob.type || "image/png", dataUrl, size: blob.size,
+      const result = writeVisualImportSession(clientIdForSession, contentIdForSession, {
+        fileName: asset.fileName ?? `serie-${seriesId}.jpg`, mimeType: asset.mimeType ?? (blob.type || "image/jpeg"), dataUrl, size: blob.size,
       });
       if (!result.ok) { setHandoffMessage(result.error); return false; }
       return true;
     } catch {
-      setHandoffMessage("Não foi possível preparar esta peça para o conteúdo.");
+      setHandoffMessage("Não foi possível preparar esta peça.");
       return false;
     }
   }
 
+  /** Fase 15-22 -- só disponível com um contentId REAL (canUseInContent); servidor revalida esse contentId contra a Company da série (FASE 36) antes de liberar o asset. */
   async function handleUseInContent(item: CreativeSeriesItem) {
+    if (!canUseInContent || !launchContext.clientId || !launchContext.contentId) return;
     setHandoffMessage(null);
-    const ok = await writeItemToSession(item);
-    if (ok) navigate(launchContext.returnRoute);
+    setPendingActionId(item.id);
+    const asset = await resolveCanonicalAsset(item.id, launchContext.contentId);
+    if (!asset.ok || !asset.signedUrl) { setPendingActionId(null); setHandoffMessage(asset.error ?? "Não foi possível preparar esta peça para o conteúdo."); return; }
+    const ok = await writeAssetToSession(launchContext.clientId, launchContext.contentId, asset as CanonicalAssetResponse & { ok: true; signedUrl: string });
+    setPendingActionId(null);
+    if (ok) navigate(launchContext.returnRoute); // FASE 22 -- 0 chamadas ao provider: só sessionStorage + navegação.
   }
 
+  /** Fase 01/09/19 -- ação MÍNIMA pra qualquer item ready Company-scoped, mesmo sem contentId real (série standalone): usa um id de transporte sintético só pra chave de sessionStorage (nunca um content_items real, nunca usado em nenhuma autorização). */
   async function handleOpenInEditor(item: CreativeSeriesItem) {
-    if (!launchContext.clientId || !launchContext.contentId) return;
+    if (!clientId) return;
     setHandoffMessage(null);
-    const ok = await writeItemToSession(item);
+    setPendingActionId(item.id);
+    const asset = await resolveCanonicalAsset(item.id);
+    if (!asset.ok || !asset.signedUrl) { setPendingActionId(null); setHandoffMessage(asset.error ?? "Não foi possível abrir esta peça no EditorOS agora."); return; }
+    const effectiveContentId = launchContext.contentId ?? seriesItemTransportContentId(seriesId, item.id);
+    const ok = await writeAssetToSession(clientId, effectiveContentId, asset as CanonicalAssetResponse & { ok: true; signedUrl: string });
+    setPendingActionId(null);
     if (!ok) return;
     const handoff = buildEditorAssetHandoff({
-      workspaceId: launchContext.clientId, clientId: launchContext.clientId, contentId: launchContext.contentId,
+      workspaceId: clientId, clientId, contentId: effectiveContentId,
       campaignId: launchContext.campaignId, assetId: null, assetSource: "geracao_ia",
-      fileUrl: null, mimeType: null, width: item.image?.width ?? null, height: item.image?.height ?? null,
+      fileUrl: null, mimeType: asset.mimeType ?? null, width: asset.width ?? item.image?.width ?? null, height: asset.height ?? item.image?.height ?? null,
       format: launchContext.format, destination: null, briefingId: null, conceptId: null, copy: null,
-      restrictions: [], returnRoute: launchContext.returnRoute,
+      restrictions: [], returnRoute: launchContext.returnRoute, // FASE 14 -- já sanitizado na fonte (parseStudioLaunchContext), nunca um redirect aberto.
     });
     const errors = validateEditorAssetHandoff(handoff);
-    if (errors.length > 0) { setHandoffMessage(`Não foi possível abrir o EditorOS: ${errors.join(", ")}.`); return; }
+    if (errors.length > 0) { setHandoffMessage(`Não foi possível abrir o EditorOS: ${errors.join(", ")}.`); return; } // FASE 22 -- 0 chamadas ao provider: só sessionStorage + navegação.
     navigate(`/admin/contentos/editor-os?${serializeEditorAssetHandoff(handoff).toString()}`);
   }
 
@@ -317,7 +397,10 @@ export function SeriesWorkspacePanel({ seriesId, initialItems, clientId, skillId
           const isRegeneratingThis = regeneratingId === item.id;
           return (
             <div key={item.id} className="rounded-xl border border-gray-100 overflow-hidden bg-gray-50" data-testid="series-workspace-item" data-item-status={item.status}>
-              <div className="aspect-square flex items-center justify-center relative">
+              <div
+                className={`aspect-square flex items-center justify-center relative ${item.status === "ready" && item.image ? "cursor-pointer" : ""}`}
+                onClick={() => { if (item.status === "ready" && item.image) setPreviewItem(item); }} // FASE 29 -- clique numa peça ready abre "ver peça" (nunca item 01 fixo -- age sobre o item clicado).
+              >
                 {item.image ? (
                   <>
                     {/* eslint-disable-next-line @next/next/no-img-element -- signed URL dinâmica */}
@@ -336,7 +419,7 @@ export function SeriesWorkspacePanel({ seriesId, initialItems, clientId, skillId
                   <span className="text-[10px] text-gray-300">{item.status === "canceled" ? "Cancelada" : "Planejada"}</span>
                 )}
               </div>
-              <div className="p-1.5 space-y-1">
+              <div className="p-1.5 space-y-1 relative">
                 <div className="flex items-center justify-between gap-1">
                   <span className="text-[9px] font-bold text-gray-500 truncate">{item.role}</span>
                   <div className="flex items-center gap-1 shrink-0">
@@ -355,20 +438,36 @@ export function SeriesWorkspacePanel({ seriesId, initialItems, clientId, skillId
                         <RotateCcw className="w-3 h-3" />
                       </button>
                     )}
-                    {item.status === "ready" && canHandoff && (
-                      <>
-                        <button type="button" onClick={() => void handleUseInContent(item)} title="Usar no conteúdo" className="text-gray-400 hover:text-purple-600">
-                          <ArrowRight className="w-3 h-3" />
-                        </button>
-                        <button type="button" onClick={() => void handleOpenInEditor(item)} title="Abrir no EditorOS" className="text-gray-400 hover:text-purple-600">
-                          <PenLine className="w-3 h-3" />
-                        </button>
-                      </>
+                    {/* FASE 01/02/03 -- só ready com asset válido; menu compacto (não lota o card) mas descobrível. */}
+                    {item.status === "ready" && item.visualAssetId && (
+                      <button type="button" onClick={() => setOpenActionsFor((v) => (v === item.id ? null : item.id))} title="Mais ações" data-testid="series-workspace-item-actions-toggle" className="text-gray-400 hover:text-purple-600">
+                        <MoreHorizontal className="w-3 h-3" />
+                      </button>
                     )}
                   </div>
                 </div>
                 {regenerateError?.id === item.id && (
                   <p className="text-[8px] text-red-500 leading-tight">{regenerateError.message}</p>
+                )}
+                {openActionsFor === item.id && (
+                  <div data-testid="series-workspace-item-actions-menu" className="absolute right-1 top-full z-10 mt-1 bg-white border border-gray-100 rounded-lg shadow-lg py-1 min-w-[140px]">
+                    <button type="button" onClick={() => { setOpenActionsFor(null); setPreviewItem(item); }} className="w-full text-left text-[10px] font-bold text-gray-600 hover:bg-gray-50 px-2.5 py-1.5 flex items-center gap-1.5">
+                      <Eye className="w-3 h-3" /> Ver peça
+                    </button>
+                    <button type="button" disabled={pendingActionId === item.id} onClick={() => { setOpenActionsFor(null); void handleDownload(item); }} className="w-full text-left text-[10px] font-bold text-gray-600 hover:bg-gray-50 px-2.5 py-1.5 flex items-center gap-1.5 disabled:opacity-40">
+                      <Download className="w-3 h-3" /> Baixar
+                    </button>
+                    {canOpenInEditor && (
+                      <button type="button" disabled={pendingActionId === item.id} onClick={() => { setOpenActionsFor(null); void handleOpenInEditor(item); }} className="w-full text-left text-[10px] font-bold text-gray-600 hover:bg-gray-50 px-2.5 py-1.5 flex items-center gap-1.5 disabled:opacity-40">
+                        <PenLine className="w-3 h-3" /> Abrir no EditorOS
+                      </button>
+                    )}
+                    {canUseInContent && (
+                      <button type="button" disabled={pendingActionId === item.id} onClick={() => { setOpenActionsFor(null); void handleUseInContent(item); }} className="w-full text-left text-[10px] font-bold text-gray-600 hover:bg-gray-50 px-2.5 py-1.5 flex items-center gap-1.5 disabled:opacity-40">
+                        <ArrowRight className="w-3 h-3" /> Usar no conteúdo
+                      </button>
+                    )}
+                  </div>
                 )}
               </div>
             </div>
@@ -380,6 +479,17 @@ export function SeriesWorkspacePanel({ seriesId, initialItems, clientId, skillId
         <div className="bg-white border border-gray-100 rounded-xl p-3">
           <p className="text-[10px] font-black uppercase tracking-wide text-gray-400 mb-2">Prévia no feed (simulação)</p>
           <FeedPreview context={feedContext} gridSize={gridSize} mode="with_new_piece" />
+        </div>
+      )}
+
+      {/* FASE 29 -- "ver peça" individual, sempre a peça selecionada (nunca item 01 fixo). */}
+      {previewItem?.image && (
+        <div data-testid="series-workspace-preview-overlay" className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-6" onClick={() => setPreviewItem(null)}>
+          {/* eslint-disable-next-line @next/next/no-img-element -- signed URL dinâmica */}
+          <img src={previewItem.image.url} alt={previewItem.role} className="max-w-full max-h-full object-contain rounded-lg" />
+          <button type="button" onClick={() => setPreviewItem(null)} aria-label="Fechar" className="absolute top-4 right-4 text-white/80 hover:text-white">
+            <X className="w-6 h-6" />
+          </button>
         </div>
       )}
     </div>

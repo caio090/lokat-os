@@ -183,6 +183,49 @@ export async function findRecentCreativeSeries(db: SupabaseClient, filter: { cli
   return getCreativeSeriesWithItems(db, (data as DbSeriesRow).id);
 }
 
+export interface CreativeSeriesSummary {
+  id: string;
+  clientId: string | null;
+  count: CreativeSeriesSize;
+  format: string | null;
+  status: CreativeSeriesRow["status"];
+  createdAt: string;
+  readyCount: number;
+  totalCount: number;
+}
+
+/**
+ * Prompt 26 (Dedicated Series Workspace Completion) -- FASE 23-28:
+ * "Séries Recentes" no Studio root. Deliberadamente LEVE (FASE 28 --
+ * "não baixar seis imagens full-resolution por série recente"): nunca
+ * hidrata `image`/signed URL de nenhum item, só conta status pra
+ * mostrar progresso ("2/6 prontas"). Aditiva -- não modifica
+ * `findRecentCreativeSeries` (ainda usada pelo fluxo "continuar" de
+ * uma única série) nem nenhuma outra função deste arquivo.
+ */
+export async function listRecentCreativeSeries(db: SupabaseClient, filter: { clientId: string | null; contentId: string | null }, limit: number): Promise<CreativeSeriesSummary[]> {
+  let query = db.from("creative_series").select("*").order("created_at", { ascending: false }).limit(limit);
+  query = filter.contentId ? query.eq("content_id", filter.contentId) : query.is("content_id", null);
+  query = filter.clientId ? query.eq("client_id", filter.clientId) : query.is("client_id", null);
+  const { data, error } = await query;
+  if (error || !data || data.length === 0) return [];
+
+  const rows = data as DbSeriesRow[];
+  const seriesIds = rows.map((r) => r.id);
+  const { data: itemRows } = await db.from("creative_series_items").select("series_id, status").in("series_id", seriesIds);
+  const readyBySeriesId = new Map<string, number>();
+  const totalBySeriesId = new Map<string, number>();
+  for (const item of (itemRows ?? []) as { series_id: string; status: string }[]) {
+    totalBySeriesId.set(item.series_id, (totalBySeriesId.get(item.series_id) ?? 0) + 1);
+    if (item.status === "ready") readyBySeriesId.set(item.series_id, (readyBySeriesId.get(item.series_id) ?? 0) + 1);
+  }
+  return rows.map((row) => ({
+    id: row.id, clientId: row.client_id, count: row.count as CreativeSeriesSize, format: row.format,
+    status: row.status as CreativeSeriesRow["status"], createdAt: row.created_at,
+    readyCount: readyBySeriesId.get(row.id) ?? 0, totalCount: totalBySeriesId.get(row.id) ?? row.count,
+  }));
+}
+
 export interface UpdateSeriesItemStatusInput {
   status: CreativeSeriesItemStatus;
   error?: string | null;

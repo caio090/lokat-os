@@ -59,11 +59,19 @@ async function main() {
     assert(!/setSeriesId\(/.test(source), "este arquivo nunca guarda um seriesId 'ativo' -- a rota /series/[seriesId] é que é a identidade agora");
   }
 
-  console.log("[test] [PROMPT 24 -- FASE 20] abrir uma série recente sempre navega pro workspace, nunca carrega items localmente");
+  console.log("[test] [PROMPT 26 -- FASE 27/33] abrir uma série recente sempre navega pro workspace, STANDALONE (nunca reusa o launchContext atual), nunca carrega items localmente");
   {
-    const body = extractFunctionBody(source, "function continueRecent()");
-    assert(/router\.push\(buildSeriesWorkspaceUrl\(recent\.series\.id, launchContext\)\)/.test(body), "continueRecent() navega pro workspace canônico da série recente");
-    assert(!/setItems/.test(body), "continueRecent() nunca seta items localmente");
+    const body = extractFunctionBody(source, "function openRecentSeries(seriesId: string)");
+    assert(/router\.push\(`\/admin\/contentos\/visual\/series\/\$\{seriesId\}`\)/.test(body), "openRecentSeries() navega direto pro workspace, sem nenhum query param (standalone -- FASE 33)");
+    assert(!/launchContext/.test(body), "nunca reusa o launchContext da sessão atual pra abrir uma série recente (FASE 33 -- 'não inventar return_to')");
+    assert(!/setItems/.test(source), "este arquivo nunca carrega items localmente");
+  }
+
+  console.log("[test] [PROMPT 26 -- FASE 23-28] lista de séries recentes é LEVE (bounded, via endpoint dedicado), nunca hidrata items/imagens");
+  {
+    assert(/fetch\(`\/api\/rec-os\/series\/recent\?/.test(source), "usa o endpoint dedicado e bounded de séries recentes");
+    assert(/params\.set\("limit", String\(RECENT_SERIES_LIMIT\)\)/.test(source), "limite explícito enviado na própria query, nunca busca tudo pra cortar depois");
+    assert(!/\.items\.filter/.test(source), "nunca acessa .items de uma série recente -- o resumo já vem com readyCount/totalCount prontos");
   }
 
   console.log("[test] [PROMPT 24] nenhuma dependência de query-param/URL pra identidade de série -- zero useSearchParams neste arquivo");

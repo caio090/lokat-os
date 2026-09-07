@@ -13,7 +13,15 @@
  * canônicas, NUNCA o conteúdo do briefing/copy inteiro -- o servidor
  * (StudioPage) resolve os dados reais a partir do `clientId` (já
  * existente) e agora também do `contentId` opcional.
+ *
+ * Prompt 26 (Dedicated Series Workspace Completion) — FASE 17/37:
+ * `returnRoute` alimenta `router.push()` em mais de um lugar agora
+ * (peça única E o workspace de série), então é sanitizado aqui, na
+ * fonte (`parseStudioLaunchContext`), com o mesmo allowlist de rota
+ * interna já usado pelo EditorOS -- nunca aceita um `return_to`
+ * controlado por query string apontando pra fora de `/admin/`.
  */
+import { sanitizeInternalReturnTo } from "@/lib/rec-os-workflow/safe-return-to";
 
 export interface StudioLaunchContext {
   clientId: string | null;
@@ -76,7 +84,7 @@ export function parseStudioLaunchContext(params: RawStudioLaunchParams): StudioL
     campaignId: params.campaign_id ?? null,
     socialProfileId: params.social_profile_id ?? null,
     format: params.source_format ?? null,
-    returnRoute: params.return_to ?? "/admin/contentos/criar",
+    returnRoute: sanitizeInternalReturnTo(params.return_to, "/admin/contentos/criar"),
   };
 }
 
