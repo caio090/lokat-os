@@ -1,13 +1,12 @@
 /**
  * Executar com: node .tmp/run-ts-test.cjs src/app/admin/contentos/visual/__tests__/series-panel-source.structural.test.ts
- * Prompt 18 (Creative Series Control & Asset Link Repair) — [TEST 01]
- * "criação não gera automaticamente" é, na prática, um contrato do
- * COMPONENTE React (_series-panel.tsx) -- sem harness de component
- * testing configurado neste projeto, o guard real e determinístico é
- * uma checagem de fonte (mesmo padrão já usado em
- * studio-neural-runtime.structural.test.ts pra "nenhum image provider
- * introduzido nesta patch"): a função createSeries() nunca pode conter
- * uma chamada de geração dentro do seu próprio corpo.
+ * Prompt 24 (Dedicated Creative Series Workspace) — `_series-panel.tsx`
+ * (root Studio, "porta de entrada") deixou de administrar qualquer
+ * série existente: só cria a ESTRUTURA (zero chamadas ao provider,
+ * regra de produto desde o Prompt 18) e navega pro workspace canônico.
+ * Toda a gestão de geração/fila/regenerate/asset-link migrou pra
+ * `series/[seriesId]/_series-workspace-panel.tsx` (ver
+ * series-workspace-panel-source.structural.test.ts).
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -18,13 +17,6 @@ const assert = (condition: boolean, label: string) => { if (condition) { passed+
 const root = path.resolve(import.meta.dirname, "../../../../../..");
 const filePath = path.join(root, "src/app/admin/contentos/visual/_series-panel.tsx");
 
-/**
- * Acha o corpo real da função a partir da assinatura. Não basta contar
- * chaves a partir do primeiro "{" -- assinaturas com tipo de retorno
- * genérico (ex.: `Promise<{ ok: true; ... }>`) têm chaves ANTES do
- * corpo de verdade. Só conta como início do corpo um "{" encontrado
- * com parênteses/ângulos (parâmetros e generics) já balanceados.
- */
 function extractFunctionBody(source: string, functionSignature: string): string {
   const start = source.indexOf(functionSignature);
   if (start === -1) throw new Error(`função "${functionSignature}" não encontrada em ${filePath}`);
@@ -49,100 +41,41 @@ function extractFunctionBody(source: string, functionSignature: string): string 
 async function main() {
   const source = fs.readFileSync(filePath, "utf8");
 
-  console.log("[test] [TEST 01] createSeries() só cria a estrutura -- NENHUMA chamada de geração dentro do próprio corpo");
+  console.log("[test] [TEST 01/PROMPT 18] createSeries() só cria a estrutura -- NENHUMA chamada de geração dentro do próprio corpo");
   {
     const body = extractFunctionBody(source, "async function createSeries()");
     assert(/fetch\("\/api\/rec-os\/series"/.test(body), "createSeries() chama POST /api/rec-os/series (cria a estrutura)");
     assert(!/generateOneItemPersisted/.test(body), "createSeries() NUNCA chama generateOneItemPersisted");
-    assert(!/runSeriesGeneration/.test(body), "createSeries() NUNCA chama runSeriesGeneration (orquestrador de fila)");
+    assert(!/runSeriesGeneration/.test(body), "createSeries() NUNCA chama runSeriesGeneration");
     assert(!/callImageProvider/.test(body), "createSeries() NUNCA chama o provider de imagem diretamente");
     assert(!/studio\/images\/generate/.test(body), "createSeries() NUNCA chama /api/studio/images/generate");
   }
 
-  console.log("[test] geração só é alcançável via ações explícitas do usuário (handleGenerateOne/handleGenerateAll), nunca automaticamente");
+  console.log("[test] [PROMPT 24 -- FASE 17/18] depois de criar, navega DE VERDADE pro workspace canônico -- nunca tenta hidratar/mostrar items aqui");
   {
-    assert(/function handleGenerateOne/.test(source), "existe uma ação explícita 'Gerar' por item");
-    assert(/function handleGenerateAll/.test(source), "existe uma ação explícita 'Gerar todas'");
-    // Nenhum useEffect deste arquivo pode chamar geração sozinho no mount/mudança de estado.
-    const effectBlocks = [...source.matchAll(/useEffect\(\(\) => \{([\s\S]*?)\n  \}, \[/g)].map((m) => m[1]);
-    for (const block of effectBlocks) {
-      assert(!/generateOneItemPersisted|runSeriesGeneration|callImageProvider/.test(block), "nenhum useEffect dispara geração sozinho");
-    }
+    const body = extractFunctionBody(source, "async function createSeries()");
+    assert(/router\.push\(buildSeriesWorkspaceUrl\(newSeriesId, launchContext\)\)/.test(body), "navega via router.push pro workspace da série recém-criada");
+    assert(!/setItems\(/.test(source), "este arquivo nunca mantém items em state -- não é mais responsabilidade dele");
+    assert(!/setSeriesId\(/.test(source), "este arquivo nunca guarda um seriesId 'ativo' -- a rota /series/[seriesId] é que é a identidade agora");
   }
 
-  console.log("[test] [TEST 04/P1-B] cancelPending() só toca items com status 'planned' localmente, nunca 'generating'");
+  console.log("[test] [PROMPT 24 -- FASE 20] abrir uma série recente sempre navega pro workspace, nunca carrega items localmente");
   {
-    const body = extractFunctionBody(source, "function cancelPending()");
-    assert(/i\.status === "planned"/.test(body), "filtra explicitamente por status === 'planned' antes de cancelar");
+    const body = extractFunctionBody(source, "function continueRecent()");
+    assert(/router\.push\(buildSeriesWorkspaceUrl\(recent\.series\.id, launchContext\)\)/.test(body), "continueRecent() navega pro workspace canônico da série recente");
+    assert(!/setItems/.test(body), "continueRecent() nunca seta items localmente");
   }
 
-  console.log("[test] [P1-C] regenerateReady() nunca faz PATCH de status ANTES do resultado do provider (protege o asset antigo em caso de falha)");
+  console.log("[test] [PROMPT 24] nenhuma dependência de query-param/URL pra identidade de série -- zero useSearchParams neste arquivo");
   {
-    const body = extractFunctionBody(source, "async function regenerateReady(item: CreativeSeriesItem)");
-    const providerCallIndex = body.indexOf("callImageProvider(");
-    const firstPatchIndex = body.indexOf("patchItem(");
-    assert(providerCallIndex !== -1, "chama o provider");
-    assert(firstPatchIndex !== -1, "eventualmente persiste (no sucesso)");
-    assert(providerCallIndex < firstPatchIndex, "o provider é chamado ANTES de qualquer PATCH -- nunca marca o item como 'planned'/'generating' antes de saber o resultado, protegendo a imagem antiga em caso de falha");
+    assert(!/useSearchParams/.test(source), "este arquivo nunca lê series_id da URL -- a rota genérica não administra mais série alguma (regra final do Prompt 24)");
+    assert(!/series_id/.test(source), "nenhuma menção a series_id -- não é mais um conceito deste componente");
   }
 
-  console.log("[test] [TEST 05] generateOneItemPersisted() sempre termina num status TERMINAL persistido -- sucesso e falha do provider, nunca fica preso em 'generating'");
+  console.log("[test] [PROMPT 24] nenhum discovery de identidade (recent NUNCA disputa com nada, porque não existe mais 'série ativa' aqui)");
   {
-    const body = extractFunctionBody(source, "async function generateOneItemPersisted(item: CreativeSeriesItem)");
-    assert(/patchItem\(seriesId, working\.id, \{ status: "generating" \}\)/.test(body), "marca 'generating' (persistido) antes de chamar o provider");
-    assert(/if \(!providerResult\.ok\) \{[\s\S]*?status: "error"/.test(body), "branch de FALHA do provider sempre persiste 'error' antes de retornar");
-    assert(/status: "ready", imageDataUrl: providerResult\.url/.test(body), "branch de SUCESSO sempre persiste 'ready' (com o vínculo real de asset) antes de retornar");
-  }
-
-  console.log("[test] [PROMPT 20 P1] series_id explícito na URL é a fonte de verdade, SEMPRE checado antes da heurística 'recente'");
-  {
-    assert(/const urlSeriesId = searchParams\.get\("series_id"\)/.test(source), "lê series_id da URL (fonte canônica, Fase 04/05)");
-    assert(/if \(urlSeriesId\) \{/.test(source), "prioriza series_id explícito sobre a busca de 'recente'");
-    assert(/fetch\(`\/api\/rec-os\/series\/\$\{urlSeriesId\}`\)/.test(source), "hidrata pelo endpoint de série exata (autorizado por RLS), nunca confia no id sem checar o servidor");
-    assert(/loaded\.series\.clientId !== clientId/.test(source), "Fase 07/08 -- nunca aceita uma série carregada que não pertence ao clientId do contexto atual");
-    assert(/setSeriesIdInUrl\(null\)/.test(source), "limpa o id da URL quando a série é inválida/não pertence ao contexto -- nunca deixa um id morto lá");
-  }
-
-  console.log("[test] [PROMPT 20 P1] criar/continuar série sempre grava o series_id real na URL (nunca só em React state)");
-  {
-    const createBody = extractFunctionBody(source, "async function createSeries()");
-    assert(/setSeriesIdInUrl\(newSeriesId\)/.test(createBody), "createSeries() grava o id real na URL assim que a série é criada");
-    const continueBody = extractFunctionBody(source, "async function continueRecent()");
-    assert(/setSeriesIdInUrl\(recent\.series\.id\)/.test(continueBody), "continueRecent() também grava o id na URL");
-  }
-
-  console.log("[test] [PROMPT 22] série SEMPRE inicializada a partir de initialSeries (resolvido pelo servidor), nunca começa vazia pra depois tentar reconstruir o que o servidor já sabe");
-  {
-    assert(/useState<string \| null>\(initialSeries\?\.series\.id \?\? null\)/.test(source), "seriesId inicializado direto do prop initialSeries");
-    assert(/useState<CreativeSeriesItem\[\] \| null>\(initialSeries\?\.items \?\? null\)/.test(source), "items inicializados direto do prop initialSeries");
-  }
-
-  console.log("[test] [PROMPT 22 -- root cause real] reconciliação reage à IDENTIDADE do que o SERVIDOR decidiu (initialSeries), nunca a mudanças soltas de clientId (essa era a race exata do incidente)");
-  {
-    assert(/const incomingServerSeriesId = initialSeries\?\.series\.id \?\? null/.test(source), "compara pela identidade (id) do que o servidor está afirmando agora");
-    assert(/if \(incomingServerSeriesId !== lastServerSeriesIdRef\.current\) \{/.test(source), "só reage quando a decisão do servidor muda de verdade -- nunca reprocessa/reseta à toa");
-    assert(!/\}, \[clientId\]\);/.test(source), "nenhum effect reage a mudanças soltas de clientId sozinho -- a causa raiz exata do P1 foi removida da arquitetura, não 'consertada' com mais lógica no mesmo padrão");
-    assert(/\}, \[initialSeries\]\);/.test(source), "o effect pareado (limpeza de ref/URL) reage ao prop initialSeries (decisão do servidor), nunca a um valor solto do cliente");
-    // Prompt 22 -- ajuste de estado (setSeriesId/setItems) acontece DURANTE o
-    // render (padrão React "adjusting state"), nunca de forma síncrona dentro
-    // do corpo de um useEffect (react-hooks/set-state-in-effect, já validado
-    // por ESLint) -- o effect emparelhado logo abaixo só toca refs/URL.
-    const pairedEffectBody = source.split("Prompt 22 -- efeitos colaterais de verdade emparelhados")[1]?.split("Fallback client-side")[0] ?? "";
-    assert(pairedEffectBody.length > 0, "achou o effect emparelhado (ref/URL) pra inspecionar isoladamente");
-    assert(!/setSeriesId\(/.test(pairedEffectBody) && !/setItems\(/.test(pairedEffectBody), "o effect emparelhado nunca chama setSeriesId/setItems diretamente -- ajuste de estado sempre no corpo do render, nunca num efeito");
-  }
-
-  console.log("[test] [PROMPT 22] fallback client-side nunca disputa com initialSeries já presente (Fase 08)");
-  {
-    assert(/if \(seriesId \|\| initialSeries\) return;/.test(source), "fallback de busca (série exata ou 'recente') nunca roda quando já existe seriesId local OU initialSeries do servidor");
-  }
-
-  console.log("[test] [PROMPT 22] createSeries()/continueRecent() marcam lastServerSeriesIdRef, pra um round-trip de router.replace nunca sobrescrever progresso local recém-criado");
-  {
-    const createBody = extractFunctionBody(source, "async function createSeries()");
-    const continueBody = extractFunctionBody(source, "async function continueRecent()");
-    assert(/lastServerSeriesIdRef\.current = newSeriesId/.test(createBody), "createSeries() sincroniza a ref ANTES do round-trip do servidor chegar");
-    assert(/lastServerSeriesIdRef\.current = recent\.series\.id/.test(continueBody), "continueRecent() também sincroniza a ref");
+    assert(!/initialSeries/.test(source), "prop initialSeries removida -- este componente nunca recebe uma série já resolvida (não administra série nenhuma além de criar)");
+    assert(!/loadedSeriesClientIdRef|lastServerSeriesIdRef/.test(source), "nenhuma ref de reconciliação -- a causa raiz do P1 recorrente (Prompts 20/21/22) não existe mais nesta arquitetura");
   }
 
   console.log(`\n[result] ${passed} passed, ${failed} failed`);

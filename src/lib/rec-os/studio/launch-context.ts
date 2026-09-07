@@ -38,6 +38,27 @@ export function buildStudioLaunchUrl(base: string, context: StudioLaunchContext)
   return qs ? `${base}?${qs}` : base;
 }
 
+/**
+ * Prompt 24 (Dedicated Creative Series Workspace) — constrói a URL do
+ * workspace canônico de uma série (`/admin/contentos/visual/series/
+ * [seriesId]`). Mesma disciplina de `buildStudioLaunchUrl` (só
+ * IDs/referências na URL, nunca briefing/copy) -- mas nunca inclui
+ * `client`: a identidade de Company do workspace vem do
+ * `series.client_id` resolvido pelo servidor (FASE 12), nunca de um
+ * query param que o usuário poderia divergir da série real.
+ */
+export function buildSeriesWorkspaceUrl(seriesId: string, context: StudioLaunchContext): string {
+  const params = new URLSearchParams();
+  if (context.contentId) params.set("content_id", context.contentId);
+  if (context.campaignId) params.set("campaign_id", context.campaignId);
+  if (context.socialProfileId) params.set("social_profile_id", context.socialProfileId);
+  if (context.format) params.set("source_format", context.format);
+  params.set("return_to", context.returnRoute);
+  const qs = params.toString();
+  const base = `/admin/contentos/visual/series/${seriesId}`;
+  return qs ? `${base}?${qs}` : base;
+}
+
 export interface RawStudioLaunchParams {
   client?: string;
   content_id?: string;

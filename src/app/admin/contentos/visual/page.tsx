@@ -1,5 +1,6 @@
 import { Palette, Sparkles, ExternalLink, AtSign } from "lucide-react";
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { ContentosSubNavServer } from "../_contentos-subnav-server";
 import { getStudioSkills, isStudioSkillContractAvailable, isStudioSkillRuntimeAvailable } from "@/lib/rec-os/studio";
 import { VIDIGAL_PNG_DELIVERY_STEPS } from "@/lib/rec-os/studio/skills/vidigal-png/instructions";
@@ -11,7 +12,7 @@ import { resolveCompanyContext } from "@/lib/company-context/resolve";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { FirstRunNote, HelpLauncher, EmptyStateGuide } from "@/components/guided-experience/guided-experience";
 import { FeedDnaSection } from "./_feed-dna-section";
-import { resolveStudioPageBootstrap } from "./page-bootstrap";
+import { resolveLegacySeriesRedirectTarget } from "./legacy-redirect";
 
 /**
  * Sprint REC OS Studio Foundation V0.1/V0.2 — reaproveita
@@ -33,18 +34,22 @@ export default async function StudioPage({
   searchParams: Promise<{ client?: string; content_id?: string; campaign_id?: string; social_profile_id?: string; source_format?: string; return_to?: string; series_id?: string }>;
 }) {
   const params = await searchParams;
+
+  // Prompt 24 (Dedicated Creative Series Workspace) -- PARTE F: uma
+  // série tem endereço próprio (/admin/contentos/visual/series/
+  // [seriesId]) desde este prompt. `?series_id=` na rota genérica é só
+  // ENTRADA LEGADA (link antigo, favorito salvo) -- nunca mais a
+  // identidade operacional. A rota genérica nunca tenta carregar/
+  // hidratar uma série existente (essa era a causa raiz recorrente dos
+  // Prompts 20/21/22: Company Context do cliente disputando autoridade
+  // com uma série vivendo como estado transitório aqui).
+  const legacyRedirectTarget = resolveLegacySeriesRedirectTarget(params);
+  if (legacyRedirectTarget) redirect(legacyRedirectTarget);
+
   const skills = getStudioSkills();
   const launchContext = parseStudioLaunchContext(params);
-
-  // Prompt 22 (Series Server-Authoritative Hydration Repair) -- P1 real
-  // de Production: uma série corretamente persistida desaparecia da UI
-  // quando o Company Context terminava de hidratar no CLIENTE. Root
-  // cause: a série era resolvida só no cliente, em dois momentos que
-  // podiam divergir. Corrigido resolvendo series_id + Company efetivo
-  // NA MESMA passada server-side, sob a sessão real (RLS) -- nunca o
-  // client precisa "adivinhar" ou reconciliar dois valores depois.
+  const clientId = params.client ?? null;
   const db = await createServerSupabaseClient();
-  const { clientId, resolvedSeries } = await resolveStudioPageBootstrap(db, params);
 
   // Fase 06/19/50/51/53 (Prompt 16) -- Social Profile First View + Studio Top
   // Bar (Company Mode apenas). Autoriza a Company ANTES de ler qualquer dado
@@ -91,7 +96,7 @@ export default async function StudioPage({
         {clientId && companyAuthorized && <FeedDnaSection clientId={clientId} initial={feedDna} />}
 
         {/* Nova criação visual */}
-        <StudioExecutionForm skills={skills.map((s) => ({ id: s.id, name: s.name }))} clientId={clientId} launchContext={launchContext} initialSeries={resolvedSeries} />
+        <StudioExecutionForm skills={skills.map((s) => ({ id: s.id, name: s.name }))} clientId={clientId} launchContext={launchContext} />
 
         {/* Skills disponíveis */}
         <div>

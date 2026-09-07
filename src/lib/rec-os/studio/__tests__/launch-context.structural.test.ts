@@ -3,7 +3,7 @@
  * Prompt 13 (REC OS Core Experience) — build/parse do StudioLaunchContext
  * são puros, sem I/O.
  */
-import { buildStudioLaunchUrl, parseStudioLaunchContext, isStudioLaunchedFromCreate } from "../launch-context";
+import { buildStudioLaunchUrl, parseStudioLaunchContext, isStudioLaunchedFromCreate, buildSeriesWorkspaceUrl } from "../launch-context";
 
 let passed = 0; let failed = 0;
 const assert = (condition: boolean, label: string) => { if (condition) { passed++; console.log(`  ok - ${label}`); } else { failed++; console.error(`  FAIL - ${label}`); } };
@@ -62,6 +62,28 @@ async function main() {
   {
     assert(isStudioLaunchedFromCreate({ clientId: "c1", contentId: "k1", campaignId: null, socialProfileId: null, format: null, returnRoute: "/x" }) === true, "com contentId -> true");
     assert(isStudioLaunchedFromCreate({ clientId: "c1", contentId: null, campaignId: null, socialProfileId: null, format: null, returnRoute: "/x" }) === false, "sem contentId -> false (Studio standalone)");
+  }
+
+  console.log("[test] Prompt 24 -- buildSeriesWorkspaceUrl nunca inclui client (identidade vem do servidor, não da URL)");
+  {
+    const url = buildSeriesWorkspaceUrl("series-1", {
+      clientId: "company-a", contentId: "content-1", campaignId: "camp-1", socialProfileId: "sp-1",
+      format: "arte_estatica", returnRoute: "/admin/contentos/criar?client=company-a&content_id=content-1",
+    });
+    assert(url.startsWith("/admin/contentos/visual/series/series-1"), "base é o workspace canônico da série");
+    assert(!url.includes("client=company-a") && !/[?&]client=/.test(url), "NUNCA inclui client -- a Company vem do servidor (series.client_id), nunca da URL");
+    assert(url.includes("content_id=content-1"), "content_id preservado (necessário pro handoff)");
+    assert(url.includes("campaign_id=camp-1"), "campaign_id preservado");
+    assert(url.includes("social_profile_id=sp-1"), "social_profile_id preservado");
+    assert(url.includes("source_format=arte_estatica"), "format preservado");
+    assert(url.includes("return_to="), "return_to preservado (necessário pro handoff de volta ao Criar)");
+    assert(!url.includes("briefing") && !url.includes("copy"), "nunca carrega conteúdo de briefing/copy na URL");
+  }
+
+  console.log("[test] Prompt 24 -- buildSeriesWorkspaceUrl sem nenhum contexto extra ainda produz uma URL limpa");
+  {
+    const url = buildSeriesWorkspaceUrl("series-2", { clientId: null, contentId: null, campaignId: null, socialProfileId: null, format: null, returnRoute: "/admin/contentos/criar" });
+    assert(url === "/admin/contentos/visual/series/series-2?return_to=%2Fadmin%2Fcontentos%2Fcriar", "só return_to sobrevive quando o resto é null");
   }
 
   console.log(`\n[result] ${passed} passed, ${failed} failed`);

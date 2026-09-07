@@ -15,7 +15,6 @@ import { writeVisualImportSession } from "@/lib/rec-os-workflow/visual-import-se
 import { buildEditorAssetHandoff, validateEditorAssetHandoff, serializeEditorAssetHandoff } from "@/lib/rec-os-workflow/editor-handoff";
 import { SeriesQuantityPicker, SeriesPanel } from "./_series-panel";
 import type { CreativeSeriesSize } from "@/lib/rec-os/studio/series/types";
-import type { CreativeSeriesWithItems } from "@/lib/rec-os/studio/series/repository";
 import { FeedPreview } from "@/components/rec-os/feed-preview";
 import { resolveFeedTemporalContext } from "@/lib/rec-os/social-profile/feed-timeline";
 
@@ -93,8 +92,8 @@ const PREVIEW_ASPECT: Record<DesignFormat, { ratio: string; maxWidth: number }> 
 type PreviewMode = "piece" | "feed" | "fullscreen";
 
 export function StudioExecutionForm({
-  skills, clientId, launchContext, initialSeries,
-}: { skills: { id: string; name: string }[]; clientId: string | null; launchContext: StudioLaunchContext; initialSeries: CreativeSeriesWithItems | null }) {
+  skills, clientId, launchContext,
+}: { skills: { id: string; name: string }[]; clientId: string | null; launchContext: StudioLaunchContext }) {
   const router = useRouter();
   const [mode, setMode] = useState<CreationMode>(clientId ? "company" : "free");
   const [freeformBrief, setFreeformBrief] = useState("");
@@ -407,12 +406,11 @@ export function StudioExecutionForm({
         </>
       ) : (
         // Fase 20-24 -- Série Visual: N requests independentes ao MESMO endpoint, nunca 1 imagem com N layouts.
+        // Prompt 24 -- criar só cria a estrutura e navega pro workspace canônico (/visual/series/[seriesId]); gestão de geração/fila/regenerate vive lá, nunca aqui.
         <SeriesPanel
-          skillId={skillId} clientId={mode === "company" ? clientId : null} contentId={launchContext.contentId} format={format} freeformBrief={freeformBrief}
-          references={references.map((a) => ({ label: a.label, url: a.url }))}
-          protectedAssets={protectedAssets.map((a) => ({ label: a.label, url: a.url }))}
+          clientId={mode === "company" ? clientId : null} format={format} freeformBrief={freeformBrief}
           quantity={quantity}
-          initialSeries={initialSeries}
+          launchContext={launchContext}
         />
       )}
 

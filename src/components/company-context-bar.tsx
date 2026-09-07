@@ -71,7 +71,19 @@ export function CompanyContextBar() {
     setOpen(false);
     // Preserva o pathname atual (Part L) -- nunca navega para outra rota
     // só por trocar de Company.
-    router.push(withCompanyContext(pathname, selectedId));
+    //
+    // Prompt 24 (Dedicated Creative Series Workspace) -- REGRA: "Trocar
+    // Company = SAIR DA SÉRIE." O workspace canônico de uma série
+    // (/admin/contentos/visual/series/[seriesId]) nunca lê `?client=`
+    // pra decidir a Company (ela vem de `series.client_id`, resolvido
+    // pelo servidor) -- então preservar o pathname aqui deixaria um
+    // `?client=` pendurado que a série simplesmente ignora, sem indicar
+    // ao usuário que nada mudou. Único ponto especial: trocar Company
+    // enquanto uma série está aberta navega pra fora dela (raiz do
+    // Studio, mesma Company nova), nunca muta o conteúdo da série "por
+    // baixo".
+    const target = pathname.startsWith("/admin/contentos/visual/series/") ? "/admin/contentos/visual" : pathname;
+    router.push(withCompanyContext(target, selectedId));
   }
 
   return (
