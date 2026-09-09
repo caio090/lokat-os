@@ -106,6 +106,34 @@ async function main() {
     }
   }
 
+  console.log("\n[dom] [PROMPT 28 -- TEST 01/08] clicar 'Usar no conteúdo' chama a rota DEDICADA de content-handoff com o content_id real -- nunca o endpoint genérico de asset");
+  {
+    const requestedUrls: string[] = [];
+    const originalFetch = global.fetch;
+    global.fetch = (async (input: unknown) => {
+      const url = String(input);
+      requestedUrls.push(url);
+      return new Response(JSON.stringify({ ok: true, signedUrl: "https://signed.example/x.jpg", mimeType: "image/jpeg", fileName: "x.jpg", width: 1080, height: 1080, contentId: "content-1" }), { status: 200 });
+    }) as typeof fetch;
+    const navigated: string[] = [];
+
+    try {
+      const items: CreativeSeriesItem[] = [item({ id: "item-1", status: "ready", visualAssetId: "asset-1", image: { url: "https://x/1", width: 1080, height: 1080 } })];
+      render(<SeriesWorkspacePanel seriesId="series-1" initialItems={items} clientId="company-a" skillId="vidigal_png" format="carousel" launchContext={LAUNCH_CONTEXT_FROM_CREATE} navigate={(path) => navigated.push(path)} />);
+      fireEvent.click(screen.getByTestId("series-workspace-item-actions-toggle"));
+      const menu = screen.getByTestId("series-workspace-item-actions-menu");
+      const useInContentButton = Array.from(menu.querySelectorAll("button")).find((b) => b.textContent?.includes("Usar no conteúdo"))!;
+      await Promise.resolve(fireEvent.click(useInContentButton));
+      await new Promise((r) => setTimeout(r, 0));
+      await new Promise((r) => setTimeout(r, 0));
+      assert(requestedUrls.some((u) => u.includes("/items/item-1/content-handoff?content_id=content-1")), "chama a rota dedicada /content-handoff com o content_id real da sessão -- nunca /asset");
+      assert(!requestedUrls.some((u) => /\/items\/item-1\/asset(\?|$)/.test(u)), "NUNCA chama o endpoint genérico de asset pra esta ação");
+      cleanup();
+    } finally {
+      global.fetch = originalFetch;
+    }
+  }
+
   console.log(`\n[dom result] ${passed} passed, ${failed} failed`);
   if (failed) process.exitCode = 1;
 }

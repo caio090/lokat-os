@@ -1,10 +1,14 @@
 /**
  * Executar com: node --experimental-test-module-mocks --import ./.tmp/preload-ts-loader.mjs --test src/app/api/rec-os/series/__tests__/series-item-asset-route.behavioral.test.ts
- * Prompt 26 (Dedicated Series Workspace Completion) — GET real de
+ * Prompt 26/28 (Dedicated Series Workspace Completion / Content
+ * Handoff Authorization) — GET real de
  * src/app/api/rec-os/series/[seriesId]/items/[itemId]/asset/route.ts.
- * [TEST 03] download resolve o ativo canônico; [TEST 05/06] content
- * handoff; [TEST 08] asset spoof -- exercitado fim a fim (rota real,
- * não só a função pura de asset-resolution.ts).
+ * [TEST 03] download resolve o ativo canônico; [TEST 08] asset spoof.
+ * Autorização de conteúdo ("Usar no conteúdo") migrou pra uma rota
+ * DEDICADA (content-handoff, ver series-item-content-handoff-route.
+ * behavioral.test.ts) -- esta rota nunca mais recebe/conhece
+ * `content_id` (Prompt 28, PARTE B: esse acoplamento era exatamente o
+ * bug).
  */
 import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
@@ -25,15 +29,12 @@ function seriesFixture(clientId: string | null, itemStatus: string, visualAssetI
   };
 }
 
-/** Fake mínimo do client Supabase da sessão: só os dois `.from()` que a rota real usa. */
-function fakeDb(opts: { assetRow?: { storage_path: string; metadata: unknown } | null; contentRow?: { id: string } | null }) {
+/** Fake mínimo do client Supabase da sessão: só o `.from()` que a rota real usa (client_visual_assets -- nunca content_items, essa rota não conhece mais content_id). */
+function fakeDb(opts: { assetRow?: { storage_path: string; metadata: unknown } | null }) {
   return {
     from(table: string) {
       if (table === "client_visual_assets") {
         return { select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: opts.assetRow ?? null, error: null }) }) }) };
-      }
-      if (table === "content_items") {
-        return { select: () => ({ eq: () => ({ eq: () => ({ maybeSingle: async () => ({ data: opts.contentRow ?? null, error: null }) }) }) }) };
       }
       throw new Error(`tabela inesperada neste fake: ${table}`);
     },
@@ -43,10 +44,10 @@ function fakeDb(opts: { assetRow?: { storage_path: string; metadata: unknown } |
   };
 }
 
-async function loadRouteWith(t: TestContext, opts: { series?: unknown; assetRow?: { storage_path: string; metadata: unknown } | null; contentRow?: { id: string } | null }) {
+async function loadRouteWith(t: TestContext, opts: { series?: unknown; assetRow?: { storage_path: string; metadata: unknown } | null }) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (t.mock.module as any)("@/lib/supabase/server", {
-    exports: { createServerSupabaseClient: async () => fakeDb({ assetRow: opts.assetRow, contentRow: opts.contentRow }) },
+    exports: { createServerSupabaseClient: async () => fakeDb({ assetRow: opts.assetRow }) },
   });
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (t.mock.module as any)("@/lib/rec-os/studio/series/repository", {
@@ -89,22 +90,8 @@ test("série inexistente/não autorizada -- 404 genérico (fail closed, RLS já 
   assert.equal(res.status, 404);
 });
 
-test("[TEST 05] content_id da MESMA Company -- autorizado, asset liberado", async (t) => {
-  const GET = await loadRouteWith(t, { assetRow: { storage_path: "company-a/item-1/gen-1.png", metadata: { mime: "image/png" } }, contentRow: { id: "content-1" } });
-  const res = await GET(getReq("http://x/api/rec-os/series/series-1/items/item-1/asset?content_id=content-1"), paramsFor("series-1", "item-1"));
-  assert.equal(res.status, 200);
-});
-
-test("[FASE 36] content_id que não pertence à Company da série -- 403, nunca libera o asset", async (t) => {
-  const GET = await loadRouteWith(t, { contentRow: null });
-  const res = await GET(getReq("http://x/api/rec-os/series/series-1/items/item-1/asset?content_id=content-de-outra-company"), paramsFor("series-1", "item-1"));
-  assert.equal(res.status, 403);
-  const data = await res.json();
-  assert.equal(data.code, "SERIES_ITEM_CONTENT_FORBIDDEN");
-});
-
-test("[TEST 06] sem content_id (Download/EditorOS) -- nunca consulta content_items, resolve normalmente", async (t) => {
+test("[TEST 26/27] content_id na query string é ignorado -- resolve normalmente, nunca 403 (regressão: essa rota não autoriza mais conteúdo nenhum)", async (t) => {
   const GET = await loadRouteWith(t, { assetRow: { storage_path: "company-a/item-1/gen-1.png", metadata: { mime: "image/png" } } });
-  const res = await GET(getReq("http://x/api/rec-os/series/series-1/items/item-1/asset"), paramsFor("series-1", "item-1"));
-  assert.equal(res.status, 200);
+  const res = await GET(getReq("http://x/api/rec-os/series/series-1/items/item-1/asset?content_id=qualquer-coisa"), paramsFor("series-1", "item-1"));
+  assert.equal(res.status, 200, "content_id na query nunca é sequer lido por esta rota -- não pode mais causar 403");
 });

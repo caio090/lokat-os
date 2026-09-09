@@ -106,10 +106,13 @@ async function main() {
     assert(/seriesItemTransportContentId\(seriesId, item\.id\)/.test(editorBody), "usa id de transporte sintético quando não há contentId real -- reaproveita o mecanismo existente (FASE 09/19), nunca um EditorHandoffV2");
   }
 
-  console.log("[test] [PROMPT 26 -- FASE 36] Usar no conteúdo envia content_id pro servidor validar (nunca confia no UUID sozinho)");
+  console.log("[test] [PROMPT 28 -- PARTE B] Usar no conteúdo chama a rota DEDICADA de content-handoff, nunca o endpoint genérico de asset (esse acoplamento era o bug que causava 403 num handoff legítimo)");
   {
     const useInContentBody = extractFunctionBody(source, "async function handleUseInContent(item: CreativeSeriesItem)");
-    assert(/resolveCanonicalAsset\(item\.id, launchContext\.contentId\)/.test(useInContentBody), "content_id é repassado pro endpoint (que valida server-side contra a Company da série)");
+    assert(/resolveContentHandoffAsset\(item\.id, launchContext\.contentId\)/.test(useInContentBody), "content_id é repassado pra rota dedicada de content-handoff (que valida server-side contra o content_id já associado à série)");
+    assert(/fetch\(`\/api\/rec-os\/series\/\$\{seriesId\}\/items\/\$\{itemId\}\/content-handoff\?content_id=/.test(source), "resolveContentHandoffAsset chama a rota /content-handoff, uma rota irmã dedicada -- nunca /asset");
+    const editorBody = extractFunctionBody(source, "async function handleOpenInEditor(item: CreativeSeriesItem)");
+    assert(/resolveCanonicalAsset\(item\.id\)/.test(editorBody) && !/resolveContentHandoffAsset/.test(editorBody), "EditorOS continua usando só o endpoint genérico de asset -- nunca precisou (nem precisa) de autorização de conteúdo");
   }
 
   console.log("[test] [PROMPT 26 -- FASE 22] handoffs (EditorOS/Usar no conteúdo) nunca chamam o endpoint de geração -- 0 chamadas ao provider");

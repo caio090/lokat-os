@@ -247,14 +247,27 @@ export function SeriesWorkspacePanel({ seriesId, initialItems, clientId, skillId
    * Fase 04/05/34/35 -- ATIVO CANÔNICO: sempre resolvido no momento da
    * ação (nunca a `image.url` já em memória), sob RLS, nunca aceitando
    * um `visual_asset_id` vindo do cliente (só seriesId+itemId). Usado
-   * pelas três portas de saída (Download/EditorOS/Usar no conteúdo).
+   * por Download e Abrir no EditorOS -- nunca autoriza conteúdo (ver
+   * resolveContentHandoffAsset, Prompt 28 PARTE B: esse acoplamento
+   * era exatamente o bug que gerava 403 num handoff legítimo).
    */
-  async function resolveCanonicalAsset(itemId: string, contentId?: string | null): Promise<CanonicalAssetResponse> {
+  async function resolveCanonicalAsset(itemId: string): Promise<CanonicalAssetResponse> {
     try {
-      const qs = contentId ? `?content_id=${encodeURIComponent(contentId)}` : "";
-      const res = await fetch(`/api/rec-os/series/${seriesId}/items/${itemId}/asset${qs}`);
+      const res = await fetch(`/api/rec-os/series/${seriesId}/items/${itemId}/asset`);
       const data = (await res.json().catch(() => null)) as CanonicalAssetResponse | null;
       if (!res.ok || !data?.ok) return { ok: false, error: data?.error ?? "Não foi possível preparar este ativo agora." };
+      return data;
+    } catch {
+      return { ok: false, error: "Não foi possível conectar ao servidor." };
+    }
+  }
+
+  /** Prompt 28 -- rota DEDICADA de "Usar no conteúdo": autoriza série+item+asset+conteúdo juntos (content-handoff.ts), nunca mistura com a resolução genérica de ativo. */
+  async function resolveContentHandoffAsset(itemId: string, contentId: string): Promise<CanonicalAssetResponse> {
+    try {
+      const res = await fetch(`/api/rec-os/series/${seriesId}/items/${itemId}/content-handoff?content_id=${encodeURIComponent(contentId)}`);
+      const data = (await res.json().catch(() => null)) as CanonicalAssetResponse | null;
+      if (!res.ok || !data?.ok) return { ok: false, error: data?.error ?? "Não foi possível preparar esta peça para o conteúdo." };
       return data;
     } catch {
       return { ok: false, error: "Não foi possível conectar ao servidor." };
@@ -306,12 +319,12 @@ export function SeriesWorkspacePanel({ seriesId, initialItems, clientId, skillId
     }
   }
 
-  /** Fase 15-22 -- só disponível com um contentId REAL (canUseInContent); servidor revalida esse contentId contra a Company da série (FASE 36) antes de liberar o asset. */
+  /** Fase 15-22 -- só disponível com um contentId REAL (canUseInContent); servidor revalida esse contentId contra o content_id já associado à série (FASE 10/11/36 -- content-handoff.ts) antes de liberar o asset. */
   async function handleUseInContent(item: CreativeSeriesItem) {
     if (!canUseInContent || !launchContext.clientId || !launchContext.contentId) return;
     setHandoffMessage(null);
     setPendingActionId(item.id);
-    const asset = await resolveCanonicalAsset(item.id, launchContext.contentId);
+    const asset = await resolveContentHandoffAsset(item.id, launchContext.contentId);
     if (!asset.ok || !asset.signedUrl) { setPendingActionId(null); setHandoffMessage(asset.error ?? "Não foi possível preparar esta peça para o conteúdo."); return; }
     const ok = await writeAssetToSession(launchContext.clientId, launchContext.contentId, asset as CanonicalAssetResponse & { ok: true; signedUrl: string });
     setPendingActionId(null);

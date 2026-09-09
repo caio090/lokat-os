@@ -2,33 +2,31 @@ import { NextRequest, NextResponse } from "next/server";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { getCreativeSeriesWithItems } from "@/lib/rec-os/studio/series/repository";
 import { resolveAssetSignedUrl } from "@/lib/rec-os/studio/series/asset-persistence";
-import { resolveSeriesItemAsset } from "@/lib/rec-os/studio/series/asset-resolution";
+import { prepareSeriesItemContentHandoff } from "@/lib/rec-os/studio/series/content-handoff";
 
 /**
- * Prompt 26 (Dedicated Series Workspace Completion) — resolve o ATIVO
- * CANÔNICO de um item de série pra Download e Abrir no EditorOS. Rota
- * de LEITURA (GET, sem `withMutationProtection` -- mesma convenção de
- * `/api/rec-os/series/[seriesId]/route.ts`, que também só lê).
- *
- * FASE 34/35 -- nunca aceita `visual_asset_id` do cliente: o único
- * input é `seriesId`/`itemId` (route params). Toda a decisão real
- * (série existe? item ready?) mora em `resolveSeriesItemAsset` (módulo
- * `.ts` puro, testado com fakes) -- esta rota só amarra os deps reais
- * ao client Supabase da SESSÃO (RLS real, nunca admin/service role).
- *
  * Prompt 28 (Content Handoff Authorization & Recent Series Repair) —
- * PARTE B: esta rota NÃO recebe mais `content_id` nem autoriza
- * conteúdo nenhum (esse acoplamento era exatamente o bug: uma query ad
- * hoc em `content_items`, sob uma política RLS antiga/incompatível com
- * `can_access_client_company()` -- ver content-handoff.ts para a
- * explicação completa e o fix real). "Usar no conteúdo" agora chama
- * `GET .../items/[itemId]/content-handoff` (rota irmã, dedicada).
+ * rota DEDICADA de "Usar no conteúdo" (FASE 06/07: separada do endpoint
+ * de asset genérico -- Download/EditorOS nunca precisaram de
+ * autorização de conteúdo, e o acoplamento anterior era exatamente o
+ * que causava o 403 num caso legítimo). Rota de LEITURA (GET, sem
+ * `withMutationProtection` -- não cria/publica/anexa nada permanente,
+ * só autoriza e transporta o ativo já existente).
+ *
+ * `content_id` é OBRIGATÓRIO aqui (nunca opcional como no antigo
+ * endpoint de asset) -- ver `content-handoff.ts` pra toda a decisão
+ * real (por que a autorização deriva de `creative_series.content_id`,
+ * nunca de uma query em `content_items`).
  */
 export async function GET(request: NextRequest, { params }: { params: Promise<{ seriesId: string; itemId: string }> }) {
   const { seriesId, itemId } = await params;
+  const contentId = new URL(request.url).searchParams.get("content_id");
+  if (!contentId) {
+    return NextResponse.json({ ok: false, error: "content_id obrigatório.", code: "CONTENT_HANDOFF_INVALID_INPUT" }, { status: 400 });
+  }
   const db = await createServerSupabaseClient();
 
-  const result = await resolveSeriesItemAsset(
+  const result = await prepareSeriesItemContentHandoff(
     {
       fetchSeriesById: (id) => getCreativeSeriesWithItems(db, id),
       fetchAssetRow: async (assetId) => {
@@ -39,7 +37,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       },
       resolveSignedUrl: (storagePath) => resolveAssetSignedUrl(db, storagePath),
     },
-    { seriesId, itemId },
+    { seriesId, itemId, contentId },
   );
 
   if (!result.ok) {
@@ -47,6 +45,6 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   }
   return NextResponse.json({
     ok: true, signedUrl: result.signedUrl, mimeType: result.mimeType, fileName: result.fileName,
-    width: result.width, height: result.height,
+    width: result.width, height: result.height, contentId: result.contentId,
   });
 }
