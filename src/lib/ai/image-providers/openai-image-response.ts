@@ -11,6 +11,7 @@
  */
 import OpenAI from "openai";
 import type { ImagesResponse } from "openai/resources/images";
+import { detectMimeFromMagicBytes } from "./image-bytes";
 
 export interface NormalizedOpenAIImage {
   url: string; // data: URL (b64_json) ou URL remota https (fallback url)
@@ -21,21 +22,6 @@ export interface NormalizedOpenAIImage {
 export type NormalizeOpenAIImageResponseResult =
   | { ok: true; images: NormalizedOpenAIImage[] }
   | { ok: false; error: string };
-
-/** Detecta magic bytes -- nunca aceita uma string base64 arbitrária
- *  como imagem válida só porque decodificou sem lançar. */
-function detectMimeFromMagicBytes(buf: Buffer): string | null {
-  if (buf.length >= 8 && buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47 && buf[4] === 0x0d && buf[5] === 0x0a && buf[6] === 0x1a && buf[7] === 0x0a) {
-    return "image/png";
-  }
-  if (buf.length >= 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) {
-    return "image/jpeg";
-  }
-  if (buf.length >= 12 && buf.toString("ascii", 0, 4) === "RIFF" && buf.toString("ascii", 8, 12) === "WEBP") {
-    return "image/webp";
-  }
-  return null;
-}
 
 function parseRequestedSize(size: string | null | undefined): { width: number; height: number } {
   const match = size ? /^(\d+)x(\d+)$/.exec(size) : null;
