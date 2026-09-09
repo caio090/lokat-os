@@ -24,27 +24,22 @@
  * `series/[seriesId]/_series-workspace-panel.tsx`, que não precisa
  * (nem pode) descobrir qual série mostrar: a rota já escolheu.
  *
- * Prompt 26 (Dedicated Series Workspace Completion) — FASE 23-28/33:
- * "Séries Recentes" vira uma lista LEVE (3-6 entradas, nunca uma
- * biblioteca completa; nunca hidrata imagem nenhuma -- só progresso via
- * `GET /api/rec-os/series/recent`). Abrir uma série recente é sempre
- * STANDALONE (FASE 33 -- "não inventar return_to"): nunca reusa o
- * `launchContext` da sessão atual (que pertence à intenção ATUAL do
- * usuário, não à série antiga que ele está reabrindo) -- navega direto
- * pra `/visual/series/[id]`, sem query nenhuma.
+ * Prompt 26 (Dedicated Series Workspace Completion) introduziu "Séries
+ * Recentes" aqui dentro -- Prompt 28 (Content Handoff Authorization &
+ * Recent Series Repair) moveu essa seção pra `_recent-series-section.tsx`,
+ * montada INCONDICIONALMENTE em `_studio-execution-form.tsx` (FASE 29:
+ * "Séries Recentes é navegação/recovery, não deve depender de o usuário
+ * selecionar Série Visual antes" -- este componente só existe/monta
+ * quando `quantity !== 1`, então Séries Recentes nunca podia aparecer
+ * no modo padrão "Peça única").
  */
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Loader2, Sparkles, ArrowRight } from "lucide-react";
+import { Loader2, Sparkles } from "lucide-react";
 import type { DesignFormat } from "@/lib/providers/shared/types";
 import type { CreativeSeriesSize } from "@/lib/rec-os/studio/series/types";
-import type { CreativeSeriesSummary } from "@/lib/rec-os/studio/series/repository";
 import type { StudioLaunchContext } from "@/lib/rec-os/studio/launch-context";
 import { buildSeriesWorkspaceUrl } from "@/lib/rec-os/studio/launch-context";
-
-const FORMAT_LABEL: Record<string, string> = { carousel: "Feed 4:5", story_vertical: "Story 9:16", feed_square: "Quadrado 1:1" };
-const STATUS_LABEL: Record<string, string> = { draft: "Rascunho", generating: "Gerando", ready: "Pronta", error: "Com erro" };
-const RECENT_SERIES_LIMIT = 6;
 
 const SIZES: CreativeSeriesSize[] = [1, 3, 6, 9];
 
@@ -76,25 +71,7 @@ export function SeriesPanel({
 }) {
   const router = useRouter();
   const [creating, setCreating] = useState(false);
-  const [recentList, setRecentList] = useState<CreativeSeriesSummary[]>([]);
   const contentId = launchContext.contentId;
-
-  /** FASE 19/23-28 -- Studio root mostra uma lista LEVE de séries recentes (nunca hidrata items/imagens aqui -- FASE 20/27: abrir sempre navega pro workspace). */
-  useEffect(() => {
-    const params = new URLSearchParams();
-    if (clientId) params.set("client_id", clientId);
-    if (contentId) params.set("content_id", contentId);
-    params.set("limit", String(RECENT_SERIES_LIMIT));
-    fetch(`/api/rec-os/series/recent?${params.toString()}`)
-      .then((r) => r.json())
-      .then((data) => { if (data?.ok && Array.isArray(data.series)) setRecentList(data.series as CreativeSeriesSummary[]); })
-      .catch(() => {});
-  }, [clientId, contentId]);
-
-  /** FASE 27/33 -- abrir uma série recente é sempre STANDALONE: nunca reusa o launchContext atual (a série antiga pode ter nascido num contexto de retorno completamente diferente), nunca hidrata localmente. */
-  function openRecentSeries(seriesId: string) {
-    router.push(`/admin/contentos/visual/series/${seriesId}`);
-  }
 
   /** FASE 16-18 -- "CRIAR SÉRIE" só cria a estrutura (0 chamadas ao provider); FASE 17/18 -- aceita o roundtrip e navega pro workspace, nunca tenta evitar navegação com malabarismo de state. */
   async function createSeries() {
@@ -111,27 +88,6 @@ export function SeriesPanel({
 
   return (
     <div className="space-y-2">
-      {/* FASE 23-28 -- lista leve (3-6), nunca uma biblioteca completa. */}
-      {recentList.length > 0 && (
-        <div className="space-y-1.5">
-          <p className="text-[10px] font-black uppercase tracking-wide text-gray-400">Séries recentes</p>
-          {recentList.map((s) => (
-            <div key={s.id} data-testid="recent-series-card" className="bg-gray-50 border border-gray-100 rounded-xl p-2.5 flex items-center justify-between gap-3">
-              <div className="min-w-0">
-                <p className="text-xs font-bold text-gray-700 truncate">
-                  {s.count === 1 ? "Peça" : `Série de ${s.count}`} · {FORMAT_LABEL[s.format ?? ""] ?? s.format ?? "Formato padrão"}
-                </p>
-                <p className="text-[10px] text-gray-400">
-                  {s.readyCount}/{s.totalCount} prontas · {STATUS_LABEL[s.status] ?? s.status} · {new Date(s.createdAt).toLocaleDateString("pt-BR")}
-                </p>
-              </div>
-              <button type="button" onClick={() => openRecentSeries(s.id)} className="text-xs font-bold text-purple-600 hover:text-purple-800 flex items-center gap-1 shrink-0">
-                <ArrowRight className="w-3 h-3" /> Abrir série
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
       <div className="bg-purple-50 border border-purple-100 rounded-xl p-3 flex items-center justify-between gap-3">
         <p className="text-xs text-purple-700">
           {quantity === 1 ? "Cria a estrutura da peça." : `Cria a estrutura da série com ${quantity} peças (nenhuma geração começa ainda).`}

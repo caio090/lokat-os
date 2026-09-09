@@ -14,6 +14,7 @@ import { isStudioLaunchedFromCreate } from "@/lib/rec-os/studio/launch-context";
 import { writeVisualImportSession } from "@/lib/rec-os-workflow/visual-import-session";
 import { buildEditorAssetHandoff, validateEditorAssetHandoff, serializeEditorAssetHandoff } from "@/lib/rec-os-workflow/editor-handoff";
 import { SeriesQuantityPicker, SeriesPanel } from "./_series-panel";
+import { RecentSeriesSection } from "./_recent-series-section";
 import type { CreativeSeriesSize } from "@/lib/rec-os/studio/series/types";
 import { FeedPreview } from "@/components/rec-os/feed-preview";
 import { resolveFeedTemporalContext } from "@/lib/rec-os/social-profile/feed-timeline";
@@ -387,6 +388,9 @@ export function StudioExecutionForm({
           </div>
         )}
       </div>
+
+      {/* Prompt 28 -- FASE 29/30: Séries Recentes é navegação/recovery, montada INCONDICIONALMENTE (nunca escondida atrás do modo "Série Visual"). */}
+      <RecentSeriesSection clientId={mode === "company" ? clientId : null} contentId={launchContext.contentId} />
 
       {quantity === 1 ? (
         <>
