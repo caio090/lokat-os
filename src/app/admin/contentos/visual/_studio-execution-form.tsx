@@ -4,7 +4,7 @@ import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   Loader2, AlertTriangle, Sparkles, Download, RefreshCw, Wand2, ChevronDown, ChevronUp, X, Building2, UserRound,
-  Maximize2, Grid3x3, Square, PenLine, ArrowRight,
+  Maximize2, Grid3x3, Square, PenLine, ArrowRight, FlaskConical,
 } from "lucide-react";
 import type { DesignFormat } from "@/lib/providers/shared/types";
 import { VIDIGAL_PNG_DELIVERY_STEPS } from "@/lib/rec-os/studio/skills/vidigal-png/instructions";
@@ -56,6 +56,9 @@ interface GenerateApiResponse {
   code?: string;
   text?: { status: string; output: VidigalPngOutputContract | null; warnings: string[]; error?: { code: string; message: string } };
   image?: { status: string; image: { url: string; width: number; height: number } | null; providerId: string | null; warnings: string[]; error?: { code: string; message: string } };
+  // FASE 31G.2 -- só presentes quando o Modo QA (Dry Run) foi autorizado pelo servidor.
+  dryRun?: boolean;
+  qaMode?: string;
 }
 
 const LOADING_STEPS = [
@@ -93,8 +96,8 @@ const PREVIEW_ASPECT: Record<DesignFormat, { ratio: string; maxWidth: number }> 
 type PreviewMode = "piece" | "feed" | "fullscreen";
 
 export function StudioExecutionForm({
-  skills, clientId, launchContext,
-}: { skills: { id: string; name: string }[]; clientId: string | null; launchContext: StudioLaunchContext }) {
+  skills, clientId, launchContext, isAdmin = false,
+}: { skills: { id: string; name: string }[]; clientId: string | null; launchContext: StudioLaunchContext; isAdmin?: boolean }) {
   const router = useRouter();
   const [mode, setMode] = useState<CreationMode>(clientId ? "company" : "free");
   const [freeformBrief, setFreeformBrief] = useState("");
@@ -115,6 +118,15 @@ export function StudioExecutionForm({
   const [showDirection, setShowDirection] = useState(false);
   const [previewMode, setPreviewMode] = useState<PreviewMode>("piece");
   const [handoffMessage, setHandoffMessage] = useState<string | null>(null);
+  // FASE 31G.2 -- Modo QA (Dry Run), visível/acionável SOMENTE pra ADM
+  // (checado no server -- este estado só decide o QUE ENVIAR, nunca
+  // decide autorização sozinho). `qaMode` no state (não só numa
+  // variável local do submit) garante que handleRegenerate/handleVariation
+  // -- que só rechamam runGeneration() com o estado atual -- também
+  // continuem em Dry Run, nunca convertendo silenciosamente pra uma
+  // chamada paga (§12).
+  const [qaModeEnabled, setQaModeEnabled] = useState(false);
+  const [resultWasDryRun, setResultWasDryRun] = useState(false);
   const referenceInputRef = useRef<HTMLInputElement>(null);
   const protectedInputRef = useRef<HTMLInputElement>(null);
   const fromCreate = isStudioLaunchedFromCreate(launchContext);
@@ -144,6 +156,7 @@ export function StudioExecutionForm({
     setTextOutput(null);
     setImage(null);
     setWarnings([]);
+    setResultWasDryRun(false);
     const stepTimer = setInterval(() => setLoadingStep((s) => Math.min(s + 1, LOADING_STEPS.length - 1)), 1800);
 
     try {
@@ -160,6 +173,8 @@ export function StudioExecutionForm({
             references: references.map((a) => ({ label: a.label, url: a.url })),
             protectedAssets: protectedAssets.map((a) => ({ label: a.label, url: a.url })),
           },
+          // FASE 31G.2 -- só enviado quando o ADM ligou o Modo QA; servidor decide se autoriza de verdade (nunca confia só nisto).
+          ...(isAdmin && qaModeEnabled ? { qaMode: "dry_run" } : {}),
         }),
       });
       const data = (await response.json().catch(() => null)) as GenerateApiResponse | null;
@@ -191,6 +206,7 @@ export function StudioExecutionForm({
 
       setImage(data.image.image);
       setWarnings([...(data.text.warnings ?? []), ...(data.image.warnings ?? [])]);
+      setResultWasDryRun(Boolean(data.dryRun));
       setStatus("completed");
     } catch {
       setErrorMessage("Não foi possível conectar ao servidor.");
@@ -392,6 +408,14 @@ export function StudioExecutionForm({
       {/* Prompt 28 -- FASE 29/30: Séries Recentes é navegação/recovery, montada INCONDICIONALMENTE (nunca escondida atrás do modo "Série Visual"). */}
       <RecentSeriesSection clientId={mode === "company" ? clientId : null} contentId={launchContext.contentId} />
 
+      {/* FASE 31G.2 -- controle de QA discreto, SOMENTE visível pra ADM (checagem real fica no servidor -- isto é só UX). */}
+      {isAdmin && (
+        <label className="flex items-center gap-2 text-[11px] font-bold text-amber-700 bg-amber-50 border border-amber-100 rounded-xl px-3 py-2 w-fit cursor-pointer">
+          <input type="checkbox" checked={qaModeEnabled} onChange={(e) => setQaModeEnabled(e.target.checked)} className="accent-amber-600" />
+          <FlaskConical className="w-3.5 h-3.5" /> Modo QA — Dry Run sem custo
+        </label>
+      )}
+
       {quantity === 1 ? (
         <>
           <button type="button" onClick={handleSubmit} disabled={status === "preparing" || !freeformBrief.trim()}
@@ -426,6 +450,13 @@ export function StudioExecutionForm({
 
       {status === "completed" && image && (
         <div className="space-y-3 pt-1">
+          {/* FASE 31G.2 §9 -- indicador visual OBRIGATÓRIO quando o resultado veio do Dry Run, pra nunca confundir fixture com arte real. Só pode aparecer pra ADM (resultWasDryRun só fica true quando o servidor autorizou qaMode). */}
+          {resultWasDryRun && (
+            <div className="bg-amber-100 border border-amber-300 rounded-xl px-3 py-2 flex items-center gap-1.5">
+              <FlaskConical className="w-3.5 h-3.5 text-amber-700 shrink-0" />
+              <p className="text-[11px] font-black text-amber-800 uppercase tracking-wide">DRY RUN · SEM CUSTO · PROVIDER MOCK</p>
+            </div>
+          )}
           {/* Fase 07/08 -- teto de EXIBIÇÃO por formato (nunca a dimensão real do arquivo, que continua 1080x{1080,1350,1920}). Três modos: Peça (escala pequena), Feed (simulação de placement), Tela cheia. */}
           <div className="flex gap-2">
             <button type="button" onClick={() => setPreviewMode("piece")} className={`text-[10px] font-bold px-2.5 py-1.5 rounded-lg flex items-center gap-1 ${previewMode === "piece" ? "bg-purple-100 text-purple-700" : "text-gray-400 hover:bg-gray-50"}`}>

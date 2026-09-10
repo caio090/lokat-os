@@ -5,6 +5,7 @@ import { createServerSupabaseClient, createSupabaseAdminClient } from "@/lib/sup
 import { withMutationProtection } from "@/lib/workspaces/assert-not-preview";
 import { createStudioVisual } from "@/lib/rec-os/studio/create-studio-visual";
 import { createStudioVisualDryRun, isDryRunActive, isFullZeroCostDryRun } from "@/lib/rec-os/studio/dry-run";
+import { isProductionQaFlagEnabled, evaluateProductionQaAccess, resolveRoleForCurrentUser } from "@/lib/rec-os/studio/production-qa-authorization";
 import type { StudioBriefInput } from "@/lib/rec-os/studio";
 import type { StudioImageAsset, StudioImageAssetKind } from "@/lib/rec-os/studio/image/types";
 
@@ -69,11 +70,15 @@ interface AssetInputBody {
   url: string;
 }
 
+/** FASE 31G.2 -- único valor aceito; qualquer outra coisa é tratada como ausente (nunca um qaMode inventado/parcial). */
+const QA_MODE_DRY_RUN = "dry_run" as const;
+
 interface GenerateBody {
   skillId: string;
   input: StudioBriefInput;
   companyId?: string;
   assets: { references: StudioImageAsset[]; protectedAssets: StudioImageAsset[] };
+  qaMode?: typeof QA_MODE_DRY_RUN;
 }
 
 function parseAssetList(list: unknown, kind: StudioImageAssetKind): StudioImageAsset[] | null {
@@ -120,7 +125,9 @@ function parseBody(raw: unknown): ParsedBody {
     return { ok: false, error: `No máximo ${MAX_ASSETS_PER_KIND} assets por tipo, cada um com URL válida (imagem em base64 ou https).` };
   }
 
-  return { ok: true, body: { skillId, input, companyId, assets: { references, protectedAssets } } };
+  const qaMode = b.qaMode === QA_MODE_DRY_RUN ? QA_MODE_DRY_RUN : undefined;
+
+  return { ok: true, body: { skillId, input, companyId, assets: { references, protectedAssets }, qaMode } };
 }
 
 export const POST = withMutationProtection(async function POST(request: NextRequest) {
@@ -135,7 +142,7 @@ export const POST = withMutationProtection(async function POST(request: NextRequ
   if (!parsed.ok) {
     return NextResponse.json({ ok: false, error: parsed.error, code: "STUDIO_SKILL_INVALID_INPUT" }, { status: 400 });
   }
-  const { skillId, input, companyId, assets } = parsed.body;
+  const { skillId, input, companyId, assets, qaMode } = parsed.body;
   if (input.freeformBrief && input.freeformBrief.length > MAX_FREEFORM_BRIEF_CHARS) {
     return NextResponse.json({ ok: false, error: `Briefing livre excede ${MAX_FREEFORM_BRIEF_CHARS} caracteres.`, code: "STUDIO_SKILL_INVALID_INPUT" }, { status: 400 });
   }
@@ -143,6 +150,11 @@ export const POST = withMutationProtection(async function POST(request: NextRequ
   // ── Autenticação/autorização (Fase 2/10) ──────────────────────────
   let resolvedCompanyId: string | null = null;
   let resolvedCompanyName: string | null = null;
+  // FASE 31G.2 -- só usada quando qaMode=dry_run é pedido (Company Mode
+  // já resolve a role de graça via resolveCompanyContext(); Free Mode
+  // busca sob demanda em resolveRoleForCurrentUser(), nunca numa
+  // requisição normal sem qaMode).
+  let resolvedRole: string | null = null;
   let rateLimitKey: string;
 
   if (companyId) {
@@ -161,6 +173,7 @@ export const POST = withMutationProtection(async function POST(request: NextRequ
     }
     resolvedCompanyId = resolution.context.companyId;
     resolvedCompanyName = resolution.context.companyName;
+    resolvedRole = resolution.context.role;
     rateLimitKey = `company:${resolution.context.companyId}|${resolution.context.workspaceId ?? "none"}`;
   } else {
     // Free Creation Mode -- só autenticação, NUNCA Company fictícia,
@@ -171,6 +184,38 @@ export const POST = withMutationProtection(async function POST(request: NextRequ
       return NextResponse.json({ ok: false, error: "Sessão necessária.", code: "STUDIO_COMPANY_CONTEXT_REQUIRED" }, { status: 401 });
     }
     rateLimitKey = `free:${user.id}`;
+  }
+
+  // FASE 31G.2 (Production-Safe QA Mode) -- qaMode="dry_run" só tem
+  // efeito quando TODAS as condições batem (flag + autenticado + role
+  // admin real, resolvida server-side, NUNCA confiada do cliente).
+  // Ausência de qaMode nunca chega aqui -- comportamento normal
+  // 100% preservado (evaluateProductionQaAccess retorna "not_requested"
+  // e nada abaixo executa).
+  let productionQaAuthorized = false;
+  if (qaMode === QA_MODE_DRY_RUN) {
+    if (resolvedRole === null && !companyId) {
+      resolvedRole = await resolveRoleForCurrentUser();
+    }
+    const decision = evaluateProductionQaAccess({
+      requested: true,
+      flagEnabled: isProductionQaFlagEnabled(),
+      authenticated: true, // ambos os modos acima já retornaram 401 antes de chegar aqui se não autenticado
+      role: resolvedRole,
+    });
+    if (decision !== "allowed") {
+      const status = decision === "unauthenticated" ? 401 : 403;
+      return NextResponse.json(
+        { ok: false, error: "Modo QA (Dry Run) não autorizado nesta conta/ambiente.", code: "STUDIO_QA_MODE_UNAUTHORIZED", reason: decision },
+        { status },
+      );
+    }
+    productionQaAuthorized = true;
+    // FASE 31G.2 §13 -- metadata segura, nunca secrets/keys/cookies.
+    console.info("[api/studio/images/generate] qaMode=dry_run autorizado", {
+      qaMode, dryRun: true, provider: "mock", externalImageCalls: 0,
+      company: resolvedCompanyId ?? "free_mode",
+    });
   }
 
   const now = Date.now();
@@ -192,11 +237,20 @@ export const POST = withMutationProtection(async function POST(request: NextRequ
   }
 
   try {
-    const dryRun = isDryRunActive();
+    // FASE 31G.2 -- dois caminhos, independentes, que chegam ao MESMO
+    // mecanismo de dry run (createStudioVisualDryRun, FASE 31G, nunca
+    // duplicado): (1) LKT_IMAGE_DRY_RUN, só Preview/dev, nunca
+    // Production; (2) qaMode="dry_run" já autorizado acima (admin real +
+    // flag + auth), SOMENTE esse caminho pode ativar em Production, e
+    // sempre fullZeroCost (§5 -- "zero cost absoluto" pra QA em Production,
+    // nunca uma opção configurável aqui).
+    const previewDryRun = isDryRunActive();
+    const dryRun = previewDryRun || productionQaAuthorized;
+    const fullZeroCost = productionQaAuthorized ? true : isFullZeroCostDryRun();
     const result = dryRun
       ? await createStudioVisualDryRun({
           skillId, input, companyId: resolvedCompanyId, companyName: resolvedCompanyName, assets, db,
-          fullZeroCost: isFullZeroCostDryRun(),
+          fullZeroCost,
         })
       : await createStudioVisual({
           skillId, input, companyId: resolvedCompanyId, companyName: resolvedCompanyName, assets, db,
@@ -221,8 +275,8 @@ export const POST = withMutationProtection(async function POST(request: NextRequ
         ok: textOk && imageOk,
         text: result.text,
         image: result.image,
-        // FASE 31G -- só presente quando o dry run está ativo; front real (Studio) nunca depende deste campo, apenas Codex/QA o inspeciona.
-        ...(dryRun ? { dryRun: true, diagnostics: "packet" in result ? result.packet : null } : {}),
+        // FASE 31G/31G.2 -- só presente quando o dry run está ativo (Preview via LKT_IMAGE_DRY_RUN, OU Production via qaMode=dry_run já autorizado como admin acima). Front real (Studio) só lê `dryRun`/`qaMode` pra mostrar o badge "DRY RUN -- SEM CUSTO" (§9); `diagnostics` é só pra Codex/QA, nunca exigido pelo fluxo normal.
+        ...(dryRun ? { dryRun: true, qaMode: productionQaAuthorized ? QA_MODE_DRY_RUN : undefined, provider: "mock", diagnostics: "packet" in result ? result.packet : null } : {}),
       },
       { status: statusCode },
     );

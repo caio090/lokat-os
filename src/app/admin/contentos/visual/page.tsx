@@ -62,6 +62,20 @@ export default async function StudioPage({
   const socialProfile = clientId && companyAuthorized ? await resolveSocialProfileContext(db, clientId) : null;
   const feedDna = clientId && companyAuthorized ? await resolveFeedDnaProfile(db, clientId) : null;
 
+  // FASE 31G.2 -- só pra decidir se mostra o controle "Modo QA" (admin-only,
+  // nunca visível pra usuário comum). Mesmo padrão de leitura de role já
+  // usado em admin/contentos/home/page.tsx (profiles.role, nunca uma
+  // segunda fonte de verdade). A autorização REAL continua 100% server-side
+  // em production-qa-authorization.ts -- esconder o botão aqui é só UX,
+  // nunca a camada de segurança.
+  let userRole = "";
+  const { data: { user } } = await db.auth.getUser();
+  if (user) {
+    const { data: profileData } = await db.from("profiles").select("role").eq("id", user.id).maybeSingle();
+    userRole = profileData?.role ?? "";
+  }
+  const isAdmin = userRole === "admin" || userRole === "super_admin";
+
   return (
     <>
       <ContentosSubNavServer initialClientId={clientId ?? undefined} />
@@ -96,7 +110,7 @@ export default async function StudioPage({
         {clientId && companyAuthorized && <FeedDnaSection clientId={clientId} initial={feedDna} />}
 
         {/* Nova criação visual */}
-        <StudioExecutionForm skills={skills.map((s) => ({ id: s.id, name: s.name }))} clientId={clientId} launchContext={launchContext} />
+        <StudioExecutionForm skills={skills.map((s) => ({ id: s.id, name: s.name }))} clientId={clientId} launchContext={launchContext} isAdmin={isAdmin} />
 
         {/* Skills disponíveis */}
         <div>
