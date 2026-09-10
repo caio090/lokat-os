@@ -199,6 +199,33 @@ async function runPromptStep() {
   return NextResponse.json({ ok: true, prompt: guardedPrompt, headlineZone: output.headlineZone }, { status: 200 });
 }
 
+/**
+ * FASE 31H.2 §1/2 -- causa raiz REAL do HTTP 504 (confirmada via
+ * runtime logs de Production, dpl_2EZmaCe9xXQceoowppLpKsA7mV84,
+ * 16:10:11): "Vercel Runtime Timeout Error: Task timed out after 60
+ * seconds" -- o teto REAL e imutável do plano Hobby (maxDuration=60,
+ * já documentado em ../studio/images/generate/route.ts; confirmado de
+ * novo aqui, não presumido). O `timeout: 55_000` que existia antes só
+ * no CONSTRUTOR do client não evitou isso -- a chamada de gpt-image-2
+ * continuou rodando além dos 55s sem abortar, até o platform matar a
+ * função inteira aos 60s (kill não interceptável por try/catch nenhum
+ * -- é o processo sendo encerrado, não uma exceção JS). gpt-image-2.5-
+ * sunburst (mesma requisição, só o modelo diferente) terminou a tempo
+ * (77,9s client-observed) -- os dois modelos legitimamente têm
+ * latência diferente pra quality=high; não presumido qual é "mais
+ * lento", só medido.
+ *
+ * Correção mínima: o MESMO padrão já usado e validado em produção
+ * (openai-images.ts) -- AbortController explícito com setTimeout,
+ * passado como segundo argumento de `.generate()` (nunca só o timeout
+ * do construtor do client, que aqui já provou na prática não abortar
+ * a tempo). GENERATE_TIMEOUT_MS fica com margem real (~8s) abaixo do
+ * teto de 60s, cobrindo o tempo de auth (resolveRoleForCurrentUser())
+ * + parsing/serialização da resposta que já acontece dentro do mesmo
+ * orçamento de 60s.
+ */
+const GENERATE_TIMEOUT_MS = 52_000;
+
 async function runGenerateStep(model: string, prompt: string) {
   if (!process.env.OPENAI_API_KEY) {
     return NextResponse.json({ error: "OPENAI_API_KEY not configured in this environment" }, { status: 503 });
@@ -207,13 +234,16 @@ async function runGenerateStep(model: string, prompt: string) {
   if (!built.ok) {
     return NextResponse.json({ ok: false, error: built.error, model }, { status: 200 });
   }
-  const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY, timeout: 55_000 });
+  const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY, timeout: GENERATE_TIMEOUT_MS });
+  const startedAt = Date.now();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), GENERATE_TIMEOUT_MS);
   try {
-    const response = await client.images.generate(built.request);
+    const response = await client.images.generate(built.request, { signal: controller.signal });
     const usage = response.usage;
     const normalized = normalizeOpenAIImageResponse(response, built.request.size);
     if (!normalized.ok) {
-      return NextResponse.json({ ok: false, error: normalized.error, model }, { status: 200 });
+      return NextResponse.json({ ok: false, error: normalized.error, model, durationMs: Date.now() - startedAt }, { status: 200 });
     }
     return NextResponse.json({
       ok: true,
@@ -223,10 +253,23 @@ async function runGenerateStep(model: string, prompt: string) {
       image: normalized.images[0],
       usage: usage ? { input_tokens: usage.input_tokens, input_tokens_details: usage.input_tokens_details, output_tokens: usage.output_tokens, total_tokens: usage.total_tokens, output_tokens_details: usage.output_tokens_details } : null,
       cost: costFor(usage),
+      durationMs: Date.now() - startedAt,
     }, { status: 200 });
   } catch (error) {
     logOpenAIImageError(error);
-    return NextResponse.json({ ok: false, error: mapOpenAIImageErrorToSafeMessage(error), model }, { status: 200 });
+    // FASE 31H.2 §3 -- timeout controlado (nosso, sempre antes do kill
+    // real da Vercel) vira JSON seguro, nunca um 504 opaco.
+    const timedOut = error instanceof Error && error.name === "AbortError";
+    if (timedOut) {
+      return NextResponse.json({
+        ok: false, category: "UPSTREAM_TIMEOUT", model, status: null,
+        durationMs: Date.now() - startedAt,
+        message: `A geração excedeu o limite interno de ${GENERATE_TIMEOUT_MS}ms (teto real da função é 60s no plano Hobby -- ver comentário de GENERATE_TIMEOUT_MS).`,
+      }, { status: 200 });
+    }
+    return NextResponse.json({ ok: false, error: mapOpenAIImageErrorToSafeMessage(error), model, durationMs: Date.now() - startedAt }, { status: 200 });
+  } finally {
+    clearTimeout(timer);
   }
 }
 

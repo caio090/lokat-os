@@ -55,18 +55,38 @@ export function resolveOpenAIImageModelFamily(model: string): OpenAIImageModelFa
   return "unknown";
 }
 
-/** Tamanhos reais aceitos pela família GPT Image
- *  (node_modules/openai/resources/images.d.ts, ImageGenerateParamsBase.size)
- *  -- nunca um valor inventado. `gpt-image-2`/`gpt-image-2-2026-04-21`
- *  também aceitam WIDTHxHEIGHT arbitrário, mas o Studio só precisa dos
- *  presets padrão (o compositor já resolve pra 1080x{1080,1350,1920}
- *  depois, o background é só um ponto de partida -- nunca é exigido
- *  que o provider gere exatamente essas dimensões finais). */
+/**
+ * Tamanhos reais aceitos pela família GPT Image
+ * (node_modules/openai/resources/images.d.ts, ImageGenerateParamsBase.size)
+ * -- nunca um valor inventado. `gpt-image-2`/`gpt-image-2-2026-04-21`
+ * também aceitam WIDTHxHEIGHT arbitrário, mas o Studio só precisa dos
+ * presets padrão (o compositor já resolve pra 1080x{1080,1350,1920}
+ * depois via `fit:"cover"` -- ver render/compositor.ts -- o background
+ * é só um ponto de partida, nunca é exigido que o provider gere
+ * exatamente essas dimensões finais; "cover" corta o excedente sem
+ * NUNCA distorcer, então quanto mais perto a proporção do background
+ * estiver da proporção final, melhor o enquadramento resultante).
+ *
+ * A API só tem 3 formas discretas (1.0 / 0.667 / 1.5, width/height) --
+ * cada ImageAspectRatio usa a mais PRÓXIMA numericamente, nunca uma
+ * escolha arbitrária:
+ *   1:1     = 1.0   -> 1024x1024 (1.0)   exata
+ *   9:16    = 0.5625-> 1024x1536 (0.667) mais próxima (dist. 0.104 vs 0.4375 do quadrado)
+ *   16:9    = 1.778 -> 1536x1024 (1.5)   mais próxima (dist. 0.278 vs 0.778 do quadrado)
+ *   1.91:1  = 1.91  -> 1536x1024 (1.5)   mais próxima (única opção >1.0 disponível)
+ *   4:5     = 0.8   -> 1024x1536 (0.667) mais próxima (dist. 0.133 vs 0.2 do quadrado)
+ *
+ * FASE 31H.2 -- "4:5" estava mapeado pra "1024x1024" (quadrado, dist.
+ * 0.2) antes desta fase: um bug real, não uma escolha defensável --
+ * 0.667 (retrato) é numericamente mais perto de 0.8 que 1.0 é.
+ * Confirmado em Production (benchmark real: pedido aspectRatio=4:5,
+ * devolvido pelo provider como 1024x1024) antes desta correção.
+ */
 const GPT_IMAGE_SIZE_MAP: Record<ImageAspectRatio, ImageGenerateParamsNonStreaming["size"]> = {
   "1:1": "1024x1024",
   "9:16": "1024x1536",
   "16:9": "1536x1024",
-  "4:5": "1024x1024",
+  "4:5": "1024x1536",
   "1.91:1": "1536x1024",
 };
 

@@ -69,7 +69,8 @@ async function main() {
 
   console.log("[test] gpt-image-2 -- modelo default da migração, matriz completa de aspect ratio");
   {
-    for (const [ar, expectedSize] of [["1:1", "1024x1024"], ["9:16", "1024x1536"], ["16:9", "1536x1024"], ["4:5", "1024x1024"], ["1.91:1", "1536x1024"]] as const) {
+    // FASE 31H.2 -- "4:5" corrigido de "1024x1024" (quadrado, bug real confirmado em Production) para "1024x1536" (retrato, numericamente mais perto de 0.8 que o quadrado 1.0 -- ver comentário de GPT_IMAGE_SIZE_MAP).
+    for (const [ar, expectedSize] of [["1:1", "1024x1024"], ["9:16", "1024x1536"], ["16:9", "1536x1024"], ["4:5", "1024x1536"], ["1.91:1", "1536x1024"]] as const) {
       const result = buildOpenAIImageRequest({ model: "gpt-image-2", prompt: "x", aspectRatio: ar });
       assert(result.ok, `gpt-image-2 (${ar}): build ok`);
       if (result.ok) {
