@@ -4,6 +4,7 @@ import { getCurrentUser } from "@/lib/auth/get-current-user";
 import { createServerSupabaseClient, createSupabaseAdminClient } from "@/lib/supabase/server";
 import { withMutationProtection } from "@/lib/workspaces/assert-not-preview";
 import { createStudioVisual } from "@/lib/rec-os/studio/create-studio-visual";
+import { createStudioVisualDryRun, isDryRunActive, isFullZeroCostDryRun } from "@/lib/rec-os/studio/dry-run";
 import type { StudioBriefInput } from "@/lib/rec-os/studio";
 import type { StudioImageAsset, StudioImageAssetKind } from "@/lib/rec-os/studio/image/types";
 
@@ -191,9 +192,15 @@ export const POST = withMutationProtection(async function POST(request: NextRequ
   }
 
   try {
-    const result = await createStudioVisual({
-      skillId, input, companyId: resolvedCompanyId, companyName: resolvedCompanyName, assets, db,
-    });
+    const dryRun = isDryRunActive();
+    const result = dryRun
+      ? await createStudioVisualDryRun({
+          skillId, input, companyId: resolvedCompanyId, companyName: resolvedCompanyName, assets, db,
+          fullZeroCost: isFullZeroCostDryRun(),
+        })
+      : await createStudioVisual({
+          skillId, input, companyId: resolvedCompanyId, companyName: resolvedCompanyName, assets, db,
+        });
 
     const textOk = result.text.status === "completed";
     const imageOk = result.image?.status === "completed";
@@ -209,7 +216,16 @@ export const POST = withMutationProtection(async function POST(request: NextRequ
         : result.image.error?.code === "STUDIO_OUTPUT_TOO_LARGE" ? 413
         : 502;
 
-    return NextResponse.json({ ok: textOk && imageOk, text: result.text, image: result.image }, { status: statusCode });
+    return NextResponse.json(
+      {
+        ok: textOk && imageOk,
+        text: result.text,
+        image: result.image,
+        // FASE 31G -- só presente quando o dry run está ativo; front real (Studio) nunca depende deste campo, apenas Codex/QA o inspeciona.
+        ...(dryRun ? { dryRun: true, diagnostics: "packet" in result ? result.packet : null } : {}),
+      },
+      { status: statusCode },
+    );
   } catch (error) {
     console.error("[api/studio/images/generate] falha inesperada", { message: error instanceof Error ? error.message : "unknown" });
     return NextResponse.json({ ok: false, error: "Não foi possível criar a peça no momento." }, { status: 500 });

@@ -90,8 +90,12 @@ export interface StudioSkillExecutionResult<TOutput = unknown> {
   skillVersion: string | null;
   /** Rótulo do runtime que de fato respondeu -- dado de execução, nunca
    *  uma dependência estática do manifesto da skill (Fase "Vidigal PNG
-   *  não conhece provider"). */
-  runtime: "not_connected" | "openai_responses_api";
+   *  não conhece provider"). FASE 31G -- "dry_run_fixture": nenhuma
+   *  chamada de IA foi feita, o output é uma fixture determinística
+   *  (LKT_IMAGE_DRY_RUN_FULL_ZERO_COST, Preview/Development only) --
+   *  nunca confundido com "not_connected" (provider ausente) nem
+   *  "openai_responses_api" (chamada real), pra nunca mascarar a origem. */
+  runtime: "not_connected" | "openai_responses_api" | "dry_run_fixture";
   status: StudioSkillExecutionStatus;
   output: TOutput | null;
   warnings: string[];
