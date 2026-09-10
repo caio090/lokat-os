@@ -111,12 +111,18 @@ export async function generateStudioImage(request: StudioImageGenerationRequest)
     // background).
     const withComposition = request.headlineZone ? applyCompositionGuidance(request.generationPrompt, request.headlineZone) : request.generationPrompt;
     const guardedPrompt = applyBackgroundGuardPolicy(withComposition);
-    const result = await provider.generate({ prompt: guardedPrompt, aspectRatio, outputCount: 1 });
+    const result = await provider.generate({
+      prompt: guardedPrompt, aspectRatio, outputCount: 1,
+      // FASE 31K -- só presente quando já autorizado/validado na rota (Super Admin + flag); ausente em todo request normal.
+      highRes: request.imageOverride?.highRes,
+      modelOverride: request.imageOverride?.model,
+    });
     if (!result.success || !result.images || result.images.length === 0) {
       return {
         status: "failed", providerId: provider.id, image: null, warnings,
         error: { code: "STUDIO_IMAGE_GENERATION_FAILED", message: result.error ?? "Não foi possível gerar a imagem no momento." },
         generatedAt: nowIso(),
+        diagnostics: result.diagnostics,
       };
     }
     const img = result.images[0];
@@ -124,6 +130,7 @@ export async function generateStudioImage(request: StudioImageGenerationRequest)
       status: "completed", providerId: provider.id,
       image: { url: img.url, width: img.width, height: img.height },
       warnings, generatedAt: nowIso(),
+      diagnostics: result.diagnostics,
     };
   } catch (error) {
     const timedOut = error instanceof Error && error.name === "AbortError";

@@ -55,7 +55,11 @@ interface GenerateApiResponse {
   error?: string;
   code?: string;
   text?: { status: string; output: VidigalPngOutputContract | null; warnings: string[]; error?: { code: string; message: string } };
-  image?: { status: string; image: { url: string; width: number; height: number } | null; providerId: string | null; warnings: string[]; error?: { code: string; message: string } };
+  image?: {
+    status: string; image: { url: string; width: number; height: number } | null; providerId: string | null; warnings: string[]; error?: { code: string; message: string };
+    // FASE 31K -- só presente quando o provider real chegou a responder (sucesso ou falha); nunca exigido pelo fluxo normal.
+    diagnostics?: { model?: string; quality?: string | null; size?: string | null; durationMs?: number; usage?: unknown };
+  };
   // FASE 31G.2 -- só presentes quando o Modo QA (Dry Run) foi autorizado pelo servidor.
   dryRun?: boolean;
   qaMode?: string;
@@ -96,8 +100,8 @@ const PREVIEW_ASPECT: Record<DesignFormat, { ratio: string; maxWidth: number }> 
 type PreviewMode = "piece" | "feed" | "fullscreen";
 
 export function StudioExecutionForm({
-  skills, clientId, launchContext, isAdmin = false,
-}: { skills: { id: string; name: string }[]; clientId: string | null; launchContext: StudioLaunchContext; isAdmin?: boolean }) {
+  skills, clientId, launchContext, isAdmin = false, isSuperAdmin = false,
+}: { skills: { id: string; name: string }[]; clientId: string | null; launchContext: StudioLaunchContext; isAdmin?: boolean; isSuperAdmin?: boolean }) {
   const router = useRouter();
   const [mode, setMode] = useState<CreationMode>(clientId ? "company" : "free");
   const [freeformBrief, setFreeformBrief] = useState("");
@@ -127,6 +131,12 @@ export function StudioExecutionForm({
   // chamada paga (§12).
   const [qaModeEnabled, setQaModeEnabled] = useState(false);
   const [resultWasDryRun, setResultWasDryRun] = useState(false);
+  // FASE 31K -- override REAL (nunca mock) de model/quality, visível/
+  // acionável SOMENTE pra Super Admin. Mesmo raciocínio de estado do
+  // Modo QA acima -- regenerate/variação continuam usando Sunburst HIGH
+  // enquanto ligado, nunca convertendo silenciosamente pro default.
+  const [sunburstQaEnabled, setSunburstQaEnabled] = useState(false);
+  const [resultDiagnostics, setResultDiagnostics] = useState<{ model?: string; quality?: string | null; size?: string | null; durationMs?: number; usage?: unknown } | null>(null);
   const referenceInputRef = useRef<HTMLInputElement>(null);
   const protectedInputRef = useRef<HTMLInputElement>(null);
   const fromCreate = isStudioLaunchedFromCreate(launchContext);
@@ -157,6 +167,7 @@ export function StudioExecutionForm({
     setImage(null);
     setWarnings([]);
     setResultWasDryRun(false);
+    setResultDiagnostics(null);
     const stepTimer = setInterval(() => setLoadingStep((s) => Math.min(s + 1, LOADING_STEPS.length - 1)), 1800);
 
     try {
@@ -175,6 +186,8 @@ export function StudioExecutionForm({
           },
           // FASE 31G.2 -- só enviado quando o ADM ligou o Modo QA; servidor decide se autoriza de verdade (nunca confia só nisto).
           ...(isAdmin && qaModeEnabled ? { qaMode: "dry_run" } : {}),
+          // FASE 31K -- só enviado quando o Super Admin ligou o Sunburst QA; servidor decide se autoriza de verdade (nunca confia só nisto).
+          ...(isSuperAdmin && sunburstQaEnabled ? { qaImageModel: "gpt-image-2.5-sunburst", qaImageQuality: "high" } : {}),
         }),
       });
       const data = (await response.json().catch(() => null)) as GenerateApiResponse | null;
@@ -207,6 +220,7 @@ export function StudioExecutionForm({
       setImage(data.image.image);
       setWarnings([...(data.text.warnings ?? []), ...(data.image.warnings ?? [])]);
       setResultWasDryRun(Boolean(data.dryRun));
+      setResultDiagnostics(data.image.diagnostics ?? null);
       setStatus("completed");
     } catch {
       setErrorMessage("Não foi possível conectar ao servidor.");
@@ -416,6 +430,14 @@ export function StudioExecutionForm({
         </label>
       )}
 
+      {/* FASE 31K -- controle SOMENTE visível pra Super Admin (mais restrito que Modo QA acima -- checagem real fica no servidor, isto é só UX). Geração REAL, nunca mock. */}
+      {isSuperAdmin && (
+        <label className="flex items-center gap-2 text-[11px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-100 rounded-xl px-3 py-2 w-fit cursor-pointer">
+          <input type="checkbox" checked={sunburstQaEnabled} onChange={(e) => setSunburstQaEnabled(e.target.checked)} className="accent-indigo-600" />
+          <FlaskConical className="w-3.5 h-3.5" /> Sunburst QA — High
+        </label>
+      )}
+
       {quantity === 1 ? (
         <>
           <button type="button" onClick={handleSubmit} disabled={status === "preparing" || !freeformBrief.trim()}
@@ -455,6 +477,18 @@ export function StudioExecutionForm({
             <div className="bg-amber-100 border border-amber-300 rounded-xl px-3 py-2 flex items-center gap-1.5">
               <FlaskConical className="w-3.5 h-3.5 text-amber-700 shrink-0" />
               <p className="text-[11px] font-black text-amber-800 uppercase tracking-wide">DRY RUN · SEM CUSTO · PROVIDER MOCK</p>
+            </div>
+          )}
+          {/* FASE 31K §11 -- só ADM/Super Admin veem isto (resultDiagnostics só vem preenchido quando o servidor devolveu diagnostics reais); sem UI bonita exigida, só visibilidade discreta pro Codex/QA. */}
+          {isSuperAdmin && resultDiagnostics?.model && (
+            <div className="bg-indigo-50 border border-indigo-100 rounded-xl px-3 py-2">
+              <p className="text-[10px] font-bold text-indigo-700">
+                {resultDiagnostics.model} · quality={resultDiagnostics.quality ?? "auto"} · size={resultDiagnostics.size ?? "?"}
+                {typeof resultDiagnostics.durationMs === "number" ? ` · ${(resultDiagnostics.durationMs / 1000).toFixed(1)}s` : ""}
+              </p>
+              {!!resultDiagnostics.usage && (
+                <p className="text-[10px] text-indigo-500 mt-0.5">usage: {JSON.stringify(resultDiagnostics.usage)}</p>
+              )}
             </div>
           )}
           {/* Fase 07/08 -- teto de EXIBIÇÃO por formato (nunca a dimensão real do arquivo, que continua 1080x{1080,1350,1920}). Três modos: Peça (escala pequena), Feed (simulação de placement), Tela cheia. */}

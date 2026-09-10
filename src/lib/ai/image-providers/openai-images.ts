@@ -33,21 +33,21 @@ import { normalizeOpenAIImageResponse, mapOpenAIImageErrorToSafeMessage, logOpen
 const API_KEY = process.env.OPENAI_API_KEY;
 const MODEL = process.env.OPENAI_IMAGE_MODEL?.trim() || DEFAULT_OPENAI_IMAGE_MODEL;
 /**
- * Prompt 11, Fase 17/18 — orçamento do pipeline dentro do teto real de
- * 60s (maxDuration, plano Hobby, ver route.ts). O cenário principal de
- * smoke (Fase 18: Free Mode, sem referência, sem logo de Company) tem
- * teto teórico texto(15s) + esta chamada(42s) + compositor(~1s) = 58s,
- * dentro do orçamento. Company Mode com logo oficial (+ fetch de
- * ~8s) ou com referências anexadas (+ até 10s por referência) pode
- * ultrapassar 60s no PIOR caso teórico simultâneo -- aceito por ora
- * (Fase 18 explicitamente adia essa otimização; o próprio
- * `maxDuration` da Vercel age como backstop final nesse caso raro,
- * nunca uma falha silenciosa). 42s (subiu de 35s no Prompt 09) porque
- * uma geração real do GPT Image pode legitimamente levar mais tempo
- * que isso -- um timeout de provider curto demais criaria um TERCEIRO
- * modo de falha previsível.
+ * Prompt 11, Fase 17/18 — orçamento do pipeline dentro do teto real da
+ * rota (maxDuration, ver route.ts).
+ *
+ * FASE 31K (Sunburst Studio QA Readiness) — subiu de 42s pra 120s.
+ * Decisão de arquitetura já tomada na FASE 31J: Hobby + Fluid Compute
+ * suporta até 300s (sem custo adicional); `maxDuration` da rota subiu
+ * junto pra 180s (route.ts). Orçamento validado matematicamente:
+ * referência(até 20s) + Vidigal(15s) + esta chamada(120s) +
+ * compositor(~1s) + overhead de auth/resposta ≈ 158s, com ~22s de
+ * margem real abaixo do teto de 180s. 120s dá espaço real pro
+ * gpt-image-2.5-sunburst (observado em benchmark real: 77,9s
+ * client-side) terminar sem abortar prematuramente, o que o valor
+ * anterior de 42s garantidamente faria.
  */
-const IMAGE_TIMEOUT_MS = 42_000;
+const IMAGE_TIMEOUT_MS = 120_000;
 
 let cachedClient: OpenAI | null = null;
 function getClient(): OpenAI {
@@ -68,8 +68,14 @@ export const OpenAIImagesProvider: ImageProvider = {
       return { success: false, error: "OPENAI_API_KEY não configurada. Geração desativada." };
     }
 
+    // FASE 31K §6/7 -- override só tem efeito quando explicitamente
+    // enviado (já autorizado e validado na rota, Super Admin + flag).
+    // Ausente (todo usuário normal, sempre) -> MODEL de sempre, nenhuma
+    // mudança de comportamento.
+    const model = input.modelOverride?.trim() || MODEL;
+
     const built = buildOpenAIImageRequest({
-      model: MODEL,
+      model,
       prompt: input.prompt,
       aspectRatio: input.aspectRatio ?? "1:1",
       highRes: input.highRes,
@@ -82,19 +88,41 @@ export const OpenAIImagesProvider: ImageProvider = {
       return { success: false, error: built.error };
     }
 
+    const startedAt = Date.now();
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), IMAGE_TIMEOUT_MS);
     try {
       const response = await getClient().images.generate(built.request, { signal: controller.signal });
+      const durationMs = Date.now() - startedAt;
+      const usage = response.usage;
       const normalized = normalizeOpenAIImageResponse(response, built.request.size);
       if (!normalized.ok) {
-        return { success: false, error: normalized.error };
+        return { success: false, error: normalized.error, diagnostics: { model, quality: built.request.quality, size: built.request.size, durationMs } };
       }
-      return { success: true, images: normalized.images, providerRaw: { model: MODEL, family: built.family, size: built.request.size, quality: built.request.quality } };
+      return {
+        success: true,
+        images: normalized.images,
+        providerRaw: { model, family: built.family, size: built.request.size, quality: built.request.quality },
+        // FASE 31K §5 -- usage real nunca mais descartado (antes só existia em providerRaw incompleto, sem usage nenhum).
+        diagnostics: {
+          model, quality: built.request.quality, size: built.request.size, durationMs,
+          usage: usage ? { input_tokens: usage.input_tokens, input_tokens_details: usage.input_tokens_details, output_tokens: usage.output_tokens, total_tokens: usage.total_tokens, output_tokens_details: usage.output_tokens_details } : undefined,
+        },
+      };
     } catch (error) {
       logOpenAIImageError(error);
-      const timedOut = error instanceof Error && error.name === "AbortError";
-      return { success: false, error: timedOut ? "A geração de imagem excedeu o tempo limite." : mapOpenAIImageErrorToSafeMessage(error) };
+      const durationMs = Date.now() - startedAt;
+      // FASE 31K §4 -- o SDK lança OpenAI.APIUserAbortError (subclasse
+      // real de APIError) quando o AbortSignal dispara -- nunca um
+      // Error nativo com .name==="AbortError". O check antigo nunca
+      // era verdadeiro de fato; a classificação de timeout se perdia,
+      // caindo na mensagem genérica de mapOpenAIImageErrorToSafeMessage.
+      const timedOut = error instanceof OpenAI.APIUserAbortError;
+      return {
+        success: false,
+        error: timedOut ? "A geração de imagem excedeu o tempo limite." : mapOpenAIImageErrorToSafeMessage(error),
+        diagnostics: { model, quality: built.request.quality, size: built.request.size, durationMs, errorCategory: timedOut ? "UPSTREAM_TIMEOUT" : undefined },
+      };
     } finally {
       clearTimeout(timer);
     }

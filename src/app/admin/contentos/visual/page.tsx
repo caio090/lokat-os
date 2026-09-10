@@ -13,6 +13,7 @@ import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { FirstRunNote, HelpLauncher, EmptyStateGuide } from "@/components/guided-experience/guided-experience";
 import { FeedDnaSection } from "./_feed-dna-section";
 import { resolveLegacySeriesRedirectTarget } from "./legacy-redirect";
+import { canAccessPlatformCentral } from "@/lib/access-control";
 
 /**
  * Sprint REC OS Studio Foundation V0.1/V0.2 — reaproveita
@@ -75,6 +76,8 @@ export default async function StudioPage({
     userRole = profileData?.role ?? "";
   }
   const isAdmin = userRole === "admin" || userRole === "super_admin";
+  /** FASE 31K -- controle "Sunburst QA / High" é mais restrito que "Modo QA" (§7 pede especificamente Super Admin, mesma autoridade central de access-control.ts usada na validação real server-side). */
+  const isSuperAdmin = canAccessPlatformCentral(userRole);
 
   return (
     <>
@@ -110,7 +113,7 @@ export default async function StudioPage({
         {clientId && companyAuthorized && <FeedDnaSection clientId={clientId} initial={feedDna} />}
 
         {/* Nova criação visual */}
-        <StudioExecutionForm skills={skills.map((s) => ({ id: s.id, name: s.name }))} clientId={clientId} launchContext={launchContext} isAdmin={isAdmin} />
+        <StudioExecutionForm skills={skills.map((s) => ({ id: s.id, name: s.name }))} clientId={clientId} launchContext={launchContext} isAdmin={isAdmin} isSuperAdmin={isSuperAdmin} />
 
         {/* Skills disponíveis */}
         <div>

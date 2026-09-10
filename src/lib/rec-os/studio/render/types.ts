@@ -8,6 +8,7 @@
  * a mais entre "direção criativa em texto" e "pixels renderizados".
  */
 import type { DesignFormat } from "@/lib/providers/shared/types";
+import type { ImageGenerationDiagnostics } from "@/lib/ai/image-providers/types";
 
 export interface StudioCanvasSize {
   width: number;
@@ -93,4 +94,6 @@ export interface StudioVisualResult {
   warnings: string[];
   error?: { code: StudioVisualErrorCode; message: string };
   generatedAt: string;
+  /** FASE 31K §5/11 -- model/quality/size/duration/usage reais do provider, nunca mais descartados. */
+  diagnostics?: ImageGenerationDiagnostics;
 }

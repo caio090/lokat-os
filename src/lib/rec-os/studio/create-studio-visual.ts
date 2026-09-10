@@ -43,6 +43,8 @@ export interface CreateStudioVisualRequest {
   companyName: string | null;
   assets: { references: StudioImageAsset[]; protectedAssets: StudioImageAsset[] };
   db: SupabaseClient;
+  /** FASE 31K -- override de model/quality já autorizado/validado pela rota (Super Admin + flag). Ausente = comportamento normal. */
+  imageOverride?: { model?: string; highRes?: boolean };
 }
 
 export interface StudioVisualCreationResult {
@@ -126,6 +128,7 @@ export async function createStudioVisual(request: CreateStudioVisualRequest): Pr
     protectedAssets,
     // Prompt 20 -- negative space reservado na cena a partir do plano de composição real da Vidigal (nunca gera o fundo primeiro e só depois torce por espaço sobrando).
     headlineZone: output.headlineZone,
+    imageOverride: request.imageOverride,
   });
 
   const pipelineWarnings = [...referenceAnalysis.warnings, ...backgroundResult.warnings];
@@ -138,6 +141,7 @@ export async function createStudioVisual(request: CreateStudioVisualRequest): Pr
         warnings: pipelineWarnings,
         error: backgroundResult.error,
         generatedAt: nowIso(),
+        diagnostics: backgroundResult.diagnostics,
       },
     };
   }
@@ -214,6 +218,7 @@ export async function createStudioVisual(request: CreateStudioVisualRequest): Pr
       renderPlan,
       warnings: pipelineWarnings,
       generatedAt: nowIso(),
+      diagnostics: backgroundResult.diagnostics,
     },
   };
 }

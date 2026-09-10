@@ -6,6 +6,7 @@ import { withMutationProtection } from "@/lib/workspaces/assert-not-preview";
 import { createStudioVisual } from "@/lib/rec-os/studio/create-studio-visual";
 import { createStudioVisualDryRun, isDryRunActive, isFullZeroCostDryRun } from "@/lib/rec-os/studio/dry-run";
 import { isProductionQaFlagEnabled, evaluateProductionQaAccess, resolveRoleForCurrentUser } from "@/lib/rec-os/studio/production-qa-authorization";
+import { canAccessPlatformCentral } from "@/lib/access-control";
 import type { StudioBriefInput } from "@/lib/rec-os/studio";
 import type { StudioImageAsset, StudioImageAssetKind } from "@/lib/rec-os/studio/image/types";
 
@@ -28,17 +29,19 @@ import type { StudioImageAsset, StudioImageAssetKind } from "@/lib/rec-os/studio
  */
 export const dynamic = "force-dynamic";
 /**
- * Prompt 09 (Studio Image Provider Compatibility) — 60s é o teto real
- * do plano Hobby da Vercel (confirmado via API: team "caio21" ->
- * plan:"hobby" -- `maxDuration` não pode passar disso neste projeto,
- * independente do valor escrito aqui). Mesmo valor já usado e validado
- * em produção por outra rota deste projeto (api/olaclick/orders).
- * Sem isso, a rota ficava no timeout DEFAULT da Vercel (bem menor que
- * 60s), o que já seria insuficiente pro pipeline completo (texto +
- * eventual análise de referência + imagem) mesmo antes de qualquer
- * chamada individual se aproximar do próprio limite dela.
+ * Prompt 09 (Studio Image Provider Compatibility) — originalmente 60s,
+ * o teto real do plano Hobby SEM Fluid Compute.
+ *
+ * FASE 31K (Sunburst Studio QA Readiness) — decisão de arquitetura já
+ * tomada na FASE 31J: este projeto roda Hobby + Fluid Compute
+ * (confirmado habilitado), que suporta até 300s de `maxDuration`, sem
+ * upgrade de plano e sem custo adicional. Subiu pra 180s -- orçamento
+ * validado matematicamente (referência até 20s + Vidigal 15s + imagem
+ * até 120s + compositor ~1s + overhead de auth/resposta ≈ 158s, com
+ * ~22s de margem real). Necessário pra permitir gpt-image-2.5-sunburst
+ * (benchmark real observado: 77,9s) terminar sem abortar prematuramente.
  */
-export const maxDuration = 60;
+export const maxDuration = 180;
 
 /**
  * Prompt 03 (Studio Release Fix) — P2: rate limit em memória local à
@@ -73,12 +76,33 @@ interface AssetInputBody {
 /** FASE 31G.2 -- único valor aceito; qualquer outra coisa é tratada como ausente (nunca um qaMode inventado/parcial). */
 const QA_MODE_DRY_RUN = "dry_run" as const;
 
+/**
+ * FASE 31K (Sunburst Studio QA Readiness) §7/8/9 -- override de
+ * model/quality pra UMA geração real controlada, autorizado SOMENTE
+ * quando: (a) `LKT_PRODUCTION_SUNBURST_QA` ligada, (b) sessão real,
+ * (c) role real === "super_admin" (canAccessPlatformCentral -- mais
+ * restrito que o admin/super_admin do qaMode=dry_run, de propósito:
+ * §7 pede especificamente Super Admin). Único valor aceito em cada
+ * campo -- qualquer outro é tratado como ausente, nunca um override
+ * parcial/inventado. Ausência de ambos preserva 100% do comportamento
+ * normal (nenhuma checagem de flag/role roda nesse caso).
+ */
+const QA_SUNBURST_MODEL = "gpt-image-2.5-sunburst" as const;
+const QA_SUNBURST_QUALITY = "high" as const;
+
+function isProductionSunburstQaFlagEnabled(): boolean {
+  const raw = process.env.LKT_PRODUCTION_SUNBURST_QA?.trim().toLowerCase();
+  return raw === "1" || raw === "true";
+}
+
 interface GenerateBody {
   skillId: string;
   input: StudioBriefInput;
   companyId?: string;
   assets: { references: StudioImageAsset[]; protectedAssets: StudioImageAsset[] };
   qaMode?: typeof QA_MODE_DRY_RUN;
+  qaImageModel?: typeof QA_SUNBURST_MODEL;
+  qaImageQuality?: typeof QA_SUNBURST_QUALITY;
 }
 
 function parseAssetList(list: unknown, kind: StudioImageAssetKind): StudioImageAsset[] | null {
@@ -126,8 +150,10 @@ function parseBody(raw: unknown): ParsedBody {
   }
 
   const qaMode = b.qaMode === QA_MODE_DRY_RUN ? QA_MODE_DRY_RUN : undefined;
+  const qaImageModel = b.qaImageModel === QA_SUNBURST_MODEL ? QA_SUNBURST_MODEL : undefined;
+  const qaImageQuality = b.qaImageQuality === QA_SUNBURST_QUALITY ? QA_SUNBURST_QUALITY : undefined;
 
-  return { ok: true, body: { skillId, input, companyId, assets: { references, protectedAssets }, qaMode } };
+  return { ok: true, body: { skillId, input, companyId, assets: { references, protectedAssets }, qaMode, qaImageModel, qaImageQuality } };
 }
 
 export const POST = withMutationProtection(async function POST(request: NextRequest) {
@@ -142,7 +168,7 @@ export const POST = withMutationProtection(async function POST(request: NextRequ
   if (!parsed.ok) {
     return NextResponse.json({ ok: false, error: parsed.error, code: "STUDIO_SKILL_INVALID_INPUT" }, { status: 400 });
   }
-  const { skillId, input, companyId, assets, qaMode } = parsed.body;
+  const { skillId, input, companyId, assets, qaMode, qaImageModel, qaImageQuality } = parsed.body;
   if (input.freeformBrief && input.freeformBrief.length > MAX_FREEFORM_BRIEF_CHARS) {
     return NextResponse.json({ ok: false, error: `Briefing livre excede ${MAX_FREEFORM_BRIEF_CHARS} caracteres.`, code: "STUDIO_SKILL_INVALID_INPUT" }, { status: 400 });
   }
@@ -186,6 +212,17 @@ export const POST = withMutationProtection(async function POST(request: NextRequ
     rateLimitKey = `free:${user.id}`;
   }
 
+  // Reaproveitada pelos dois gates abaixo (qaMode e qaImageModel/Quality)
+  // -- nunca duas queries de role pra mesma requisição. Company Mode já
+  // resolveu `resolvedRole` de graça acima; Free Mode busca sob demanda,
+  // só quando algum dos dois overrides é pedido.
+  async function resolveRoleIfNeeded(): Promise<string | null> {
+    if (resolvedRole === null && !companyId) {
+      resolvedRole = await resolveRoleForCurrentUser();
+    }
+    return resolvedRole;
+  }
+
   // FASE 31G.2 (Production-Safe QA Mode) -- qaMode="dry_run" só tem
   // efeito quando TODAS as condições batem (flag + autenticado + role
   // admin real, resolvida server-side, NUNCA confiada do cliente).
@@ -194,14 +231,11 @@ export const POST = withMutationProtection(async function POST(request: NextRequ
   // e nada abaixo executa).
   let productionQaAuthorized = false;
   if (qaMode === QA_MODE_DRY_RUN) {
-    if (resolvedRole === null && !companyId) {
-      resolvedRole = await resolveRoleForCurrentUser();
-    }
     const decision = evaluateProductionQaAccess({
       requested: true,
       flagEnabled: isProductionQaFlagEnabled(),
       authenticated: true, // ambos os modos acima já retornaram 401 antes de chegar aqui se não autenticado
-      role: resolvedRole,
+      role: await resolveRoleIfNeeded(),
     });
     if (decision !== "allowed") {
       const status = decision === "unauthenticated" ? 401 : 403;
@@ -214,6 +248,31 @@ export const POST = withMutationProtection(async function POST(request: NextRequ
     // FASE 31G.2 §13 -- metadata segura, nunca secrets/keys/cookies.
     console.info("[api/studio/images/generate] qaMode=dry_run autorizado", {
       qaMode, dryRun: true, provider: "mock", externalImageCalls: 0,
+      company: resolvedCompanyId ?? "free_mode",
+    });
+  }
+
+  // FASE 31K §7/8 -- qaImageModel/qaImageQuality (geração REAL, nunca
+  // mock) só tem efeito com flag `LKT_PRODUCTION_SUNBURST_QA` ligada +
+  // sessão real + role EXATAMENTE "super_admin" (mais restrito que o
+  // admin/super_admin do qaMode acima, por pedido explícito desta
+  // fase). Ausência de ambos os campos nunca chega aqui -- requisição
+  // normal, comportamento 100% preservado.
+  let imageOverride: { model?: string; highRes?: boolean } | undefined;
+  if (qaImageModel || qaImageQuality) {
+    const role = await resolveRoleIfNeeded();
+    const flagEnabled = isProductionSunburstQaFlagEnabled();
+    if (!flagEnabled || !role || !canAccessPlatformCentral(role)) {
+      const status = !role ? 401 : 403;
+      return NextResponse.json(
+        { ok: false, error: "Override de modelo/quality (Sunburst QA) não autorizado nesta conta/ambiente.", code: "STUDIO_SUNBURST_QA_UNAUTHORIZED" },
+        { status },
+      );
+    }
+    imageOverride = { model: qaImageModel, highRes: qaImageQuality === QA_SUNBURST_QUALITY };
+    // FASE 31K §11 -- metadata segura, nunca secrets/keys/cookies.
+    console.info("[api/studio/images/generate] override Sunburst QA autorizado", {
+      qaImageModel: qaImageModel ?? null, qaImageQuality: qaImageQuality ?? null,
       company: resolvedCompanyId ?? "free_mode",
     });
   }
@@ -254,6 +313,8 @@ export const POST = withMutationProtection(async function POST(request: NextRequ
         })
       : await createStudioVisual({
           skillId, input, companyId: resolvedCompanyId, companyName: resolvedCompanyName, assets, db,
+          // FASE 31K -- só presente quando já autorizado acima (Super Admin + flag); ausente em toda requisição normal.
+          imageOverride,
         });
 
     const textOk = result.text.status === "completed";

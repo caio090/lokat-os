@@ -38,6 +38,17 @@ class FakeAPIErrorBase extends Error {
   }
 }
 
+/**
+ * FASE 31K -- mesma classe exposta como `OpenAI.APIUserAbortError` no
+ * mock (subclasse REAL de APIError no SDK, nunca um Error nativo com
+ * `.name==="AbortError"` -- confirmado em node_modules/openai/core/error.js;
+ * era exatamente esse descasamento que fazia o Studio real perder a
+ * classificação de timeout, FASE 31I §H/30).
+ */
+class FakeAPIUserAbortError extends FakeAPIErrorBase {
+  constructor() { super("Request was aborted."); }
+}
+
 async function loadProviderWith(t: TestContext, opts: {
   model?: string;
   apiKey?: string;
@@ -61,6 +72,7 @@ async function loadProviderWith(t: TestContext, opts: {
       },
     };
     static APIError = FakeAPIErrorBase;
+    static APIUserAbortError = FakeAPIUserAbortError;
     constructor(_o: unknown) { void _o; }
   }
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -139,14 +151,25 @@ test("sem OPENAI_API_KEY -- indisponível explicitamente, nunca tenta chamar o S
   assert.match(result.error ?? "", /não configurada/i);
 });
 
-test("timeout do provider -- AbortError vira mensagem segura de timeout, nunca lança", async (t) => {
+test("timeout do provider -- APIUserAbortError (erro real do SDK, FASE 31K) vira mensagem segura de timeout, nunca lança", async (t) => {
+  const { provider } = await loadProviderWith(t, {
+    model: "gpt-image-1", apiKey: "sk-test-fake-never-real",
+    generateImpl: async () => { throw new FakeAPIUserAbortError(); },
+  });
+  const result = await provider.generate({ prompt: "x" });
+  assert.equal(result.success, false);
+  assert.match(result.error ?? "", /tempo limite/i);
+  assert.equal(result.diagnostics?.errorCategory, "UPSTREAM_TIMEOUT", "categoria segura explícita, nunca mais perdida (FASE 31I §30 -> FASE 31K §4)");
+});
+
+test("timeout do provider -- um Error nativo com .name==='AbortError' (nunca lançado pelo SDK real, mas hipotético) NÃO é classificado como timeout -- só APIUserAbortError real conta", async (t) => {
   const { provider } = await loadProviderWith(t, {
     model: "gpt-image-1", apiKey: "sk-test-fake-never-real",
     generateImpl: async () => { const e = new Error("aborted"); e.name = "AbortError"; throw e; },
   });
   const result = await provider.generate({ prompt: "x" });
   assert.equal(result.success, false);
-  assert.match(result.error ?? "", /tempo limite/i);
+  assert.notEqual(result.diagnostics?.errorCategory, "UPSTREAM_TIMEOUT", "só instanceof OpenAI.APIUserAbortError classifica como timeout, nunca .name");
 });
 
 test("erro do provider (SDK APIError simulado) -- mensagem segura, nunca o texto bruto", async (t) => {

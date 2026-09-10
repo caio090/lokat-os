@@ -10,6 +10,7 @@
  */
 import type { DesignFormat } from "@/lib/providers/shared/types";
 import type { VidigalHeadlineZone } from "../skills/vidigal-png/output";
+import type { ImageGenerationDiagnostics } from "@/lib/ai/image-providers/types";
 
 /**
  * Prompt 20 (Studio Visual Quality) — Fase 09/10: contrato conceitual
@@ -76,6 +77,13 @@ export interface StudioImageGenerationRequest {
   protectedAssets: StudioImageAsset[];
   /** Prompt 20 -- decidido pela Vidigal (VisualCompositionPlan); reserva negative space na cena ANTES da geração, nunca depois. Opcional/retrocompatível -- ausência cai no comportamento anterior (nenhuma instrução de zona). */
   headlineZone?: VidigalHeadlineZone;
+  /**
+   * FASE 31K (Sunburst Studio QA Readiness) -- override explícito de
+   * model/quality, já autorizado e validado na rota (Super Admin +
+   * `LKT_PRODUCTION_SUNBURST_QA`, ver route.ts) antes de chegar aqui.
+   * Ausente = comportamento normal, idêntico ao de antes desta fase.
+   */
+  imageOverride?: { model?: string; highRes?: boolean };
 }
 
 export type StudioImageResultStatus = "completed" | "failed" | "runtime_unavailable";
@@ -95,4 +103,6 @@ export interface StudioImageGenerationResult {
   warnings: string[];
   error?: { code: StudioImageErrorCode; message: string };
   generatedAt: string;
+  /** FASE 31K §5/11 -- nunca mais descartado; presente em sucesso e em falha (quando o provider chegou a tentar). */
+  diagnostics?: ImageGenerationDiagnostics;
 }
