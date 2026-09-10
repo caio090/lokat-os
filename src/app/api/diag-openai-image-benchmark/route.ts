@@ -10,20 +10,14 @@ import { applyBackgroundGuardPolicy } from "@/lib/rec-os/studio/image/background
 import { buildOpenAIImageRequest } from "@/lib/ai/image-providers/openai-image-compat";
 import { normalizeOpenAIImageResponse, mapOpenAIImageErrorToSafeMessage, logOpenAIImageError } from "@/lib/ai/image-providers/openai-image-response";
 import type { VidigalPngOutputContract } from "@/lib/rec-os/studio/skills/vidigal-png/output";
+import { resolveRoleForCurrentUser } from "@/lib/rec-os/studio/production-qa-authorization";
+import { canAccessAdmin } from "@/lib/access-control";
 
 /**
- * FASE 31F.0B/D — mecanismo de benchmark TEMPORÁRIO, SOMENTE-PREVIEW:
- * compara gpt-image-2 vs gpt-image-2.5-sunburst com o MESMO
- * generationPrompt (brief -> Vidigal, uma única vez -> mesma string
- * reaproveitada nas duas chamadas de imagem, nunca duas gerações de
- * texto divergentes). Nunca roda em Production.
- *
- * FASE 31F.0D -- removido o token hardcoded que existia aqui antes
- * (nunca deveria ir pro commit). Proteção agora é só a combinação já
- * existente no projeto: VERCEL_ENV==="preview" (nunca spoofável pelo
- * cliente) + Vercel Deployment Protection (SSO da própria Vercel,
- * confirmado habilitado neste projeto pra qualquer URL que não seja o
- * domínio customizado de Production) -- nenhum secret novo criado.
+ * FASE 31F.0B/D — mecanismo de benchmark TEMPORÁRIO que compara
+ * gpt-image-2 vs gpt-image-2.5-sunburst com o MESMO generationPrompt
+ * (brief -> Vidigal, uma única vez -> mesma string reaproveitada nas
+ * duas chamadas de imagem, nunca duas gerações de texto divergentes).
  *
  * Split em dois steps (?step=prompt e ?step=generate) -- este projeto
  * roda no plano Hobby da Vercel, com maxDuration travado em 60s (ver
@@ -35,11 +29,29 @@ import type { VidigalPngOutputContract } from "@/lib/rec-os/studio/skills/vidiga
  * reaproveita a MESMA string de prompt (devolvida por ?step=prompt)
  * nas duas chamadas de ?step=generate -- nunca duas gerações de texto.
  *
+ * FASE 31H (Production-Safe OpenAI Benchmark) — QA passou a acontecer
+ * no domínio oficial de Production (regra do projeto: Preview não é
+ * mais referência final pra login/Company/Supabase/Studio reais).
+ * Preview continua liberado como antes (VERCEL_ENV==="preview" +
+ * Vercel Deployment Protection/SSO, nenhum secret novo). Production
+ * SÓ é permitido quando TODAS as condições abaixo (GET()) são
+ * verdadeiras: feature flag `LKT_PRODUCTION_OPENAI_BENCHMARK` ligada +
+ * usuário autenticado + role real admin/super_admin (mesma autoridade
+ * central de production-qa-authorization.ts/access-control.ts,
+ * reaproveitada aqui, nunca uma segunda checagem de role). Nenhum
+ * token hardcoded, nenhum secret na URL, nenhum bypass da Vercel.
+ *
  * NÃO É CÓDIGO DE PRODUTO. Arquivo temporário -- remover depois do
  * benchmark (ver relatório).
  */
 
 export const maxDuration = 60;
+
+/** FASE 31H §2 -- só AUTORIZA o benchmark em Production; nunca troca provider/modelo do Studio, nunca gera nada sozinha. */
+function isProductionOpenAIBenchmarkEnabled(): boolean {
+  const raw = process.env.LKT_PRODUCTION_OPENAI_BENCHMARK?.trim().toLowerCase();
+  return raw === "1" || raw === "true";
+}
 
 const VALID_MODELS = ["gpt-image-2", "gpt-image-2.5-sunburst"] as const;
 
@@ -219,12 +231,37 @@ async function runGenerateStep(model: string, prompt: string) {
 }
 
 export async function GET(request: NextRequest) {
-  // FASE 2/14/31F.0D -- nunca em Production, sem exceção. Preview real, verificado pelo próprio runtime Vercel (nunca spoofável pelo cliente). Única proteção além disso: Vercel Deployment Protection (SSO), já habilitado no projeto -- nenhum secret/token novo neste arquivo.
-  if (process.env.VERCEL_ENV !== "preview") {
+  // FASE 2/14/31F.0D/31H -- VERCEL_ENV é decidido pelo runtime da
+  // Vercel, nunca spoofável pelo cliente. "preview": mesma proteção de
+  // sempre (Vercel Deployment Protection/SSO, sem secret novo).
+  // "production": SÓ com flag + auth real + role admin -- qualquer
+  // outro ambiente (dev local, etc.) continua bloqueado, como sempre.
+  const env = process.env.VERCEL_ENV;
+  if (env === "production") {
+    if (!isProductionOpenAIBenchmarkEnabled()) {
+      return NextResponse.json({ error: "not found" }, { status: 404 });
+    }
+    // FASE 31H §3 -- autorização real do LKT, nunca token hardcoded/secret
+    // na URL/bypass da Vercel. resolveRoleForCurrentUser() já cobre "sem
+    // sessão" (devolve null) -- um único 403 pra ambos os casos (usuário
+    // comum e não-autenticado), nunca revela qual dos dois foi.
+    const role = await resolveRoleForCurrentUser();
+    if (!role || !canAccessAdmin(role)) {
+      return NextResponse.json({ ok: false, error: "forbidden" }, { status: 403 });
+    }
+  } else if (env !== "preview") {
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
 
-  const step = request.nextUrl.searchParams.get("step");
+  // Fase 31H -- `new URL(request.url)` em vez de `request.nextUrl`:
+  // mesmo resultado em runtime real (NextRequest.nextUrl só embrulha
+  // isso), mas nunca depende do símbolo interno da instância de
+  // "next/server" que o Next injeta em produção -- evita um footgun
+  // real de duplicação de módulo ESM descoberto testando esta rota
+  // (request.nextUrl vinha `undefined` num NextRequest construído
+  // fora do runtime do Next, mesmo sendo uma instância genuína).
+  const searchParams = new URL(request.url).searchParams;
+  const step = searchParams.get("step");
 
   if (step === "diag_text") {
     return runDiagTextStep();
@@ -239,8 +276,8 @@ export async function GET(request: NextRequest) {
   }
 
   if (step === "generate") {
-    const model = request.nextUrl.searchParams.get("model") ?? "";
-    const prompt = request.nextUrl.searchParams.get("prompt") ?? "";
+    const model = searchParams.get("model") ?? "";
+    const prompt = searchParams.get("prompt") ?? "";
     if (!(VALID_MODELS as readonly string[]).includes(model) || !prompt) {
       return NextResponse.json({ error: "missing/invalid model or prompt" }, { status: 400 });
     }
