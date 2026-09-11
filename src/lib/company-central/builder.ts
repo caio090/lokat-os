@@ -13,6 +13,8 @@ export const COMPANY_CENTRAL_MODULE_SHORTCUTS_BASE: CompanyCentralModuleShortcut
   { label: "Calendário", href: "/admin/calendario" },
   { label: "CRM", href: "/admin/leads" },
   { label: "REC OS", href: "/admin/contentos" },
+  // FASE 31O — Admin Company DNA Editor.
+  { label: "Company DNA", href: "/admin/empresa/dna" },
 ];
 
 function moduleShortcuts(companyId: string): CompanyCentralModuleShortcut[] {

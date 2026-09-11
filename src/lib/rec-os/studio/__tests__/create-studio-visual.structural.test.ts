@@ -30,6 +30,8 @@ async function loadOrchestratorWith(t: TestContext, opts: {
   fetchAssetResult?: unknown;
   onBuildBusinessContext?: (companyId: unknown) => void;
   onCompose?: (input: unknown) => void;
+  /** FASE 31O -- quando true, NÃO mocka business-context.ts: deixa a função real rodar contra o `db` fixture passado em createStudioVisual({db}), provando a cadeia completa onboarding_profiles -> business-context.ts -> createStudioVisual, não só um businessContext já pronto à mão. */
+  useRealBusinessContext?: boolean;
 }) {
   let executeCalls = 0;
   let lastExecuteRequest: unknown = null;
@@ -51,15 +53,17 @@ async function loadOrchestratorWith(t: TestContext, opts: {
       },
     },
   });
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (t.mock.module as any)("../business-context.ts", {
-    exports: {
-      buildStudioCreativeBusinessContext: async (_db: unknown, companyId: unknown) => {
-        opts.onBuildBusinessContext?.(companyId);
-        return context;
+  if (!opts.useRealBusinessContext) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (t.mock.module as any)("../business-context.ts", {
+      exports: {
+        buildStudioCreativeBusinessContext: async (_db: unknown, companyId: unknown) => {
+          opts.onBuildBusinessContext?.(companyId);
+          return context;
+        },
       },
-    },
-  });
+    });
+  }
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (t.mock.module as any)("../image/image-runtime.ts", {
     exports: {
@@ -137,6 +141,44 @@ test("[16] logo oficial da Company é automaticamente adicionado como protected 
   assert.equal(imgReq.protectedAssets.some((a) => a.url === "https://cdn.example.com/logo.png" && a.kind === "protected" && a.role === "logo"), true, "logo oficial entra automaticamente como protected/role logo, sem o usuário precisar marcar");
   const compose = composeInput as { protectedAssetBytes: { assetId: string }[] };
   assert.equal(compose.protectedAssetBytes.some((a) => a.assetId === "company-logo"), true, "bytes do logo oficial (buscados via fetch SSRF-safe) chegam ao compositor");
+  assert.equal(result.image?.status, "completed");
+});
+
+test("[FASE 31O] Company DNA salvo pelo novo editor administrativo (onboarding_profiles real) -- business-context.ts REAL lê o logo, createStudioVisual auto-adiciona como protected asset e o compositor recebe os bytes", async (t) => {
+  // Linha exatamente no formato que a rota PUT /api/admin/clients/[id]/onboarding-profile
+  // grava (ONBOARDING_PROFILE_FIELDS + convenção brand_colors [{label,hex}]) --
+  // prova o round-trip completo sem hand-construir um businessContext pronto.
+  const row = {
+    brand_name: "Empresa A", logo_url: "https://cdn.example.com/logo-fase31o.png",
+    brand_colors: [{ label: "Primária", hex: "#ff0000" }],
+    visual_style: null, visual_references: null, tone_of_voice: null, words_use: null, words_avoid: null,
+    segment: null, ideal_customer: null, age_range: null, audience_location: null, pains: null, desires: null, objections: null,
+    products_services: null,
+  };
+  const fakeDb = {
+    from: () => ({ select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: row, error: null }) }) }) }),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  } as any;
+
+  let composeInput: unknown = null;
+  const { createStudioVisual, getLastImageRequest } = await loadOrchestratorWith(t, {
+    useRealBusinessContext: true,
+    onCompose: (input) => { composeInput = input; },
+  });
+  const result = await createStudioVisual({
+    skillId: "vidigal_png", input: { freeformBrief: "teste" },
+    companyId: "c1", companyName: "Empresa A", assets: { references: [], protectedAssets: [] },
+    db: fakeDb,
+  });
+
+  const imgReq = getLastImageRequest() as { protectedAssets: { url: string; kind: string; role?: string }[] };
+  assert.equal(
+    imgReq.protectedAssets.some((a) => a.url === row.logo_url && a.kind === "protected" && a.role === "logo"),
+    true,
+    "business-context.ts REAL leu logo_url da linha e createStudioVisual auto-adicionou como protected/role logo",
+  );
+  const compose = composeInput as { protectedAssetBytes: { assetId: string }[] };
+  assert.equal(compose.protectedAssetBytes.some((a) => a.assetId === "company-logo"), true, "bytes do logo (fetch SSRF-safe) chegam ao compositor");
   assert.equal(result.image?.status, "completed");
 });
 

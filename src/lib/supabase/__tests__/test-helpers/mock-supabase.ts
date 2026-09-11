@@ -39,12 +39,12 @@ export interface MockSupabaseOptions {
   profileRole?: string | null;
   /** fn name -> resultado fixo, fila de resultados (consumida em ordem), ou função(args) -> resultado */
   rpcResults?: Record<string, ResultOrQueue | ((args: Record<string, unknown>) => AnyResult)>;
-  /** table -> { select?, update?, delete?, insert? } cada um fixo ou fila */
-  fromResults?: Record<string, Partial<Record<"select" | "update" | "delete" | "insert", ResultOrQueue>>>;
+  /** table -> { select?, update?, delete?, insert?, upsert? } cada um fixo ou fila */
+  fromResults?: Record<string, Partial<Record<"select" | "update" | "delete" | "insert" | "upsert", ResultOrQueue>>>;
 }
 
 export interface RpcCall { fn: string; args: Record<string, unknown> }
-export interface FromCall { table: string; op: "select" | "update" | "delete" | "insert"; payload?: unknown }
+export interface FromCall { table: string; op: "select" | "update" | "delete" | "insert" | "upsert"; payload?: unknown }
 
 export function makeMockSupabaseClient(opts: MockSupabaseOptions = {}) {
   const rpcCalls: RpcCall[] = [];
@@ -77,6 +77,11 @@ export function makeMockSupabaseClient(opts: MockSupabaseOptions = {}) {
           fromCalls.push({ table, op: "insert", payload });
           const cfg = opts.fromResults?.[table]?.insert;
           return makeThenable(cfg ? nextResult(queueState, `${table}.insert`, cfg) : { data: null, error: null });
+        },
+        upsert(payload: unknown) {
+          fromCalls.push({ table, op: "upsert", payload });
+          const cfg = opts.fromResults?.[table]?.upsert;
+          return makeThenable(cfg ? nextResult(queueState, `${table}.upsert`, cfg) : { data: null, error: null });
         },
       };
     },

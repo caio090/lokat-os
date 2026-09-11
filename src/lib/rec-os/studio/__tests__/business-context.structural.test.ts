@@ -77,6 +77,25 @@ async function main() {
     assert(result.identity === null, "identity null quando a query falha -- nunca trava a geração por causa do enriquecimento");
   }
 
+  console.log("[test] [FASE 31O] linha gravada pelo novo editor administrativo (ONBOARDING_PROFILE_FIELDS + brand_colors [{label,hex}]) é lida corretamente");
+  {
+    const row = {
+      brand_name: "Empresa A", logo_url: "https://cdn.example.com/logo-fase31o.png",
+      brand_colors: [{ label: "Primária", hex: "#ff0000" }, { label: "Secundária", hex: "#00ff00" }],
+      visual_style: "clean", visual_references: null,
+      tone_of_voice: ["direto"], words_use: null, words_avoid: null,
+      segment: "varejo", ideal_customer: null, age_range: null, audience_location: null, pains: null, desires: null, objections: null,
+      products_services: "produto A",
+    };
+    const db = fakeDb({ data: row, error: null });
+    const result = await buildStudioCreativeBusinessContext(db, "company-a", "Empresa A");
+    assert(result.identity?.logoUrl === "https://cdn.example.com/logo-fase31o.png", "identity.logoUrl vem da linha gravada pelo editor administrativo (FASE 31O)");
+    const colors = result.identity?.brandColors as { label: string; hex: string }[] | null;
+    assert(Array.isArray(colors) && colors.length === 2 && colors[0]?.hex === "#ff0000", "brand_colors no formato [{label,hex}] do editor chega intacto (passthrough jsonb)");
+    assert(result.brand?.toneOfVoice?.[0] === "direto", "tone_of_voice chega intacto");
+    assert(result.products?.productsServices === "produto A", "products_services chega intacto");
+  }
+
   console.log(`\n[result] ${passed} passed, ${failed} failed`);
   if (failed > 0) process.exit(1);
 }

@@ -15,7 +15,15 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { StudioSkillBusinessContext } from "./runtime";
 
-interface OnboardingProfileRow {
+/**
+ * FASE 31O (Admin Company DNA Editor) — exportado pra ser a fonte
+ * única do que "Company DNA" significa nesta versão: o novo editor
+ * administrativo (admin/empresa/dna) e sua API (api/admin/clients/[id]/
+ * onboarding-profile) usam EXATAMENTE esta lista de colunas, nunca uma
+ * segunda lista divergente -- garante por construção que tudo editável
+ * pelo Super Admin é exatamente o que este arquivo realmente lê.
+ */
+export interface OnboardingProfileRow {
   brand_name: string | null;
   logo_url: string | null;
   brand_colors: unknown;
@@ -34,12 +42,13 @@ interface OnboardingProfileRow {
   products_services: string | null;
 }
 
-const ONBOARDING_PROFILE_COLUMNS = [
+export const ONBOARDING_PROFILE_FIELDS = [
   "brand_name", "logo_url", "brand_colors", "visual_style", "visual_references",
   "tone_of_voice", "words_use", "words_avoid",
   "segment", "ideal_customer", "age_range", "audience_location", "pains", "desires", "objections",
   "products_services",
-].join(", ");
+] as const;
+const ONBOARDING_PROFILE_COLUMNS = ONBOARDING_PROFILE_FIELDS.join(", ");
 
 export async function buildStudioCreativeBusinessContext(
   db: SupabaseClient,
