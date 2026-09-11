@@ -11,6 +11,7 @@ import { VIDIGAL_PNG_DELIVERY_STEPS } from "@/lib/rec-os/studio/skills/vidigal-p
 import type { VidigalPngOutputContract } from "@/lib/rec-os/studio/skills/vidigal-png/output";
 import type { StudioLaunchContext } from "@/lib/rec-os/studio/launch-context";
 import { isStudioLaunchedFromCreate } from "@/lib/rec-os/studio/launch-context";
+import type { StudioImageGenerateRequestBody } from "@/lib/rec-os/studio";
 import { writeVisualImportSession } from "@/lib/rec-os-workflow/visual-import-session";
 import { buildEditorAssetHandoff, validateEditorAssetHandoff, serializeEditorAssetHandoff } from "@/lib/rec-os-workflow/editor-handoff";
 import { SeriesQuantityPicker, SeriesPanel } from "./_series-panel";
@@ -171,24 +172,37 @@ export function StudioExecutionForm({
     const stepTimer = setInterval(() => setLoadingStep((s) => Math.min(s + 1, LOADING_STEPS.length - 1)), 1800);
 
     try {
+      // FASE 31L -- contrato EXPLÍCITO e tipado com a rota real
+      // (StudioImageGenerateRequestBody, studio/types.ts). Causa raiz
+      // do bug real encontrado na FASE 31K.1 ("Company selecionada na
+      // UI virava free_mode"): companyId vivia dentro de `input` (um
+      // campo genérico do briefing, lido por OUTRA rota --
+      // /api/studio/skills/execute -- nunca por esta), enquanto a rota
+      // de imagem sempre autorizou a partir do nível SUPERIOR do body.
+      // Construir a variável tipada ANTES do fetch garante, em tempo
+      // de compilação, que companyId nunca mais fica preso dentro de
+      // `input` por engano.
+      const requestBody: StudioImageGenerateRequestBody = {
+        skillId,
+        mode,
+        companyId: mode === "company" ? (clientId ?? undefined) : undefined,
+        input: {
+          freeformBrief: brief.trim(), format,
+          headline: headline.trim() || undefined, cta: cta.trim() || undefined,
+        },
+        assets: {
+          references: references.map((a) => ({ label: a.label, url: a.url })),
+          protectedAssets: protectedAssets.map((a) => ({ label: a.label, url: a.url })),
+        },
+        // FASE 31G.2 -- só enviado quando o ADM ligou o Modo QA; servidor decide se autoriza de verdade (nunca confia só nisto).
+        ...(isAdmin && qaModeEnabled ? { qaMode: "dry_run" as const } : {}),
+        // FASE 31K -- só enviado quando o Super Admin ligou o Sunburst QA; servidor decide se autoriza de verdade (nunca confia só nisto).
+        ...(isSuperAdmin && sunburstQaEnabled ? { qaImageModel: "gpt-image-2.5-sunburst" as const, qaImageQuality: "high" as const } : {}),
+      };
       const response = await fetch("/api/studio/images/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          skillId,
-          input: {
-            freeformBrief: brief.trim(), format, companyId: mode === "company" ? (clientId ?? undefined) : undefined,
-            headline: headline.trim() || undefined, cta: cta.trim() || undefined,
-          },
-          assets: {
-            references: references.map((a) => ({ label: a.label, url: a.url })),
-            protectedAssets: protectedAssets.map((a) => ({ label: a.label, url: a.url })),
-          },
-          // FASE 31G.2 -- só enviado quando o ADM ligou o Modo QA; servidor decide se autoriza de verdade (nunca confia só nisto).
-          ...(isAdmin && qaModeEnabled ? { qaMode: "dry_run" } : {}),
-          // FASE 31K -- só enviado quando o Super Admin ligou o Sunburst QA; servidor decide se autoriza de verdade (nunca confia só nisto).
-          ...(isSuperAdmin && sunburstQaEnabled ? { qaImageModel: "gpt-image-2.5-sunburst", qaImageQuality: "high" } : {}),
-        }),
+        body: JSON.stringify(requestBody),
       });
       const data = (await response.json().catch(() => null)) as GenerateApiResponse | null;
 

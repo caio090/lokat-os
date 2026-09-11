@@ -7,7 +7,7 @@ import { createStudioVisual } from "@/lib/rec-os/studio/create-studio-visual";
 import { createStudioVisualDryRun, isDryRunActive, isFullZeroCostDryRun } from "@/lib/rec-os/studio/dry-run";
 import { isProductionQaFlagEnabled, evaluateProductionQaAccess, resolveRoleForCurrentUser } from "@/lib/rec-os/studio/production-qa-authorization";
 import { canAccessPlatformCentral } from "@/lib/access-control";
-import type { StudioBriefInput } from "@/lib/rec-os/studio";
+import type { StudioBriefInput, StudioGenerationMode } from "@/lib/rec-os/studio";
 import type { StudioImageAsset, StudioImageAssetKind } from "@/lib/rec-os/studio/image/types";
 
 /**
@@ -97,6 +97,13 @@ function isProductionSunburstQaFlagEnabled(): boolean {
 
 interface GenerateBody {
   skillId: string;
+  /**
+   * FASE 31L -- mesmo tipo exportado em StudioImageGenerateRequestBody
+   * (studio/types.ts), reaproveitado aqui como o shape real que a rota
+   * de fato entende (assets já resolvidos pra StudioImageAsset[], nunca
+   * o StudioImageAssetInputBody[] cru do request -- ver parseAssetList).
+   */
+  mode?: StudioGenerationMode;
   input: StudioBriefInput;
   companyId?: string;
   assets: { references: StudioImageAsset[]; protectedAssets: StudioImageAsset[] };
@@ -128,7 +135,12 @@ function parseBody(raw: unknown): ParsedBody {
   const skillId = typeof b.skillId === "string" ? b.skillId.trim() : "";
   if (!skillId) return { ok: false, error: "skillId obrigatório." };
   const rawInput = (b.input && typeof b.input === "object" ? b.input : {}) as Record<string, unknown>;
+  // FASE 31L §2/3 -- SEMPRE lido do nível SUPERIOR do body, nunca de
+  // dentro de `input` (StudioBriefInput.companyId é um campo diferente,
+  // genérico, usado por outras rotas -- ver studio/types.ts). Este é o
+  // único valor que autoriza Company Mode nesta rota.
   const companyId = typeof b.companyId === "string" && b.companyId.trim() ? b.companyId.trim() : undefined;
+  const mode: StudioGenerationMode | undefined = b.mode === "company" || b.mode === "free" ? b.mode : undefined;
 
   // Prompt 03 (P1) -- campos estruturados de texto determinístico:
   // validados explicitamente (nunca um cast cego), nunca truncados em
@@ -153,7 +165,7 @@ function parseBody(raw: unknown): ParsedBody {
   const qaImageModel = b.qaImageModel === QA_SUNBURST_MODEL ? QA_SUNBURST_MODEL : undefined;
   const qaImageQuality = b.qaImageQuality === QA_SUNBURST_QUALITY ? QA_SUNBURST_QUALITY : undefined;
 
-  return { ok: true, body: { skillId, input, companyId, assets: { references, protectedAssets }, qaMode, qaImageModel, qaImageQuality } };
+  return { ok: true, body: { skillId, mode, input, companyId, assets: { references, protectedAssets }, qaMode, qaImageModel, qaImageQuality } };
 }
 
 export const POST = withMutationProtection(async function POST(request: NextRequest) {
@@ -168,9 +180,22 @@ export const POST = withMutationProtection(async function POST(request: NextRequ
   if (!parsed.ok) {
     return NextResponse.json({ ok: false, error: parsed.error, code: "STUDIO_SKILL_INVALID_INPUT" }, { status: 400 });
   }
-  const { skillId, input, companyId, assets, qaMode, qaImageModel, qaImageQuality } = parsed.body;
+  const { skillId, mode, input, companyId, assets, qaMode, qaImageModel, qaImageQuality } = parsed.body;
   if (input.freeformBrief && input.freeformBrief.length > MAX_FREEFORM_BRIEF_CHARS) {
     return NextResponse.json({ ok: false, error: `Briefing livre excede ${MAX_FREEFORM_BRIEF_CHARS} caracteres.`, code: "STUDIO_SKILL_INVALID_INPUT" }, { status: 400 });
+  }
+
+  // FASE 31L §4 -- causa raiz real do bug "Company selecionada na UI
+  // vira free_mode": mode==="company" enviado sem companyId (ou com um
+  // valor que não sobreviveu à validação acima) NUNCA mais cai
+  // silenciosamente em Free Mode -- erro explícito, 400, antes de
+  // qualquer resolução/geração. mode ausente preserva o comportamento
+  // de antes desta fase (decide só pela presença de companyId).
+  if (mode === "company" && !companyId) {
+    return NextResponse.json(
+      { ok: false, error: "Nenhuma empresa selecionada para o modo Company -- selecione uma empresa ou troque para criação livre.", code: "STUDIO_COMPANY_MODE_ID_MISSING" },
+      { status: 400 },
+    );
   }
 
   // ── Autenticação/autorização (Fase 2/10) ──────────────────────────
@@ -201,6 +226,17 @@ export const POST = withMutationProtection(async function POST(request: NextRequ
     resolvedCompanyName = resolution.context.companyName;
     resolvedRole = resolution.context.role;
     rateLimitKey = `company:${resolution.context.companyId}|${resolution.context.workspaceId ?? "none"}`;
+    // FASE 31L §13 -- log seguro (nunca dados sensíveis) pra confirmar
+    // no runtime que requestedCompanyId/resolvedCompanyId realmente
+    // coincidem -- exatamente o que a FASE 31K.1 provou não acontecer.
+    if (mode === "company") {
+      console.info("[api/studio/images/generate] company mode", {
+        companyMode: true,
+        requestedCompanyId: companyId,
+        resolvedCompanyId: resolution.context.companyId,
+        companyName: resolution.context.companyName,
+      });
+    }
   } else {
     // Free Creation Mode -- só autenticação, NUNCA Company fictícia,
     // NUNCA resolveCompanyContext() forçado (ele sempre exige Company

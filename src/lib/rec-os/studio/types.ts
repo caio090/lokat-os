@@ -100,3 +100,36 @@ export type FutureStudioNeuralBridge = Pick<
   CanonicalBusinessContext,
   "companyId" | "workspaceId" | "role" | "capabilities" | "connections"
 >;
+
+/**
+ * FASE 31L (Company Context Fix) — contrato EXPLÍCITO do body de POST
+ * /api/studio/images/generate. Front (_studio-execution-form.tsx) e
+ * rota (route.ts) importam este MESMO tipo -- nunca dois shapes
+ * divergentes de novo. Causa raiz real corrigida nesta fase:
+ * `companyId` estava sendo enviado dentro de `input` (StudioBriefInput.
+ * companyId é um campo genérico do briefing, usado por outras rotas
+ * como /api/studio/skills/execute -- que lê `input.companyId` de
+ * propósito, um contrato DIFERENTE e válido pra ela) enquanto esta
+ * rota sempre autorizou a partir do nível SUPERIOR do body -- o valor
+ * dentro de `input` nunca era lido pra autorização aqui, e o fluxo
+ * caía silenciosamente em Free Mode. `companyId` deste tipo é o único
+ * que importa pra resolveCompanyContext() nesta rota.
+ */
+export type StudioGenerationMode = "company" | "free";
+
+export interface StudioImageAssetInputBody {
+  label?: string;
+  url: string;
+}
+
+export interface StudioImageGenerateRequestBody {
+  skillId: string;
+  mode: StudioGenerationMode;
+  /** Nível SUPERIOR do body, nunca dentro de `input`. Obrigatório em espírito quando mode==="company" -- validado em runtime pela rota (400 explícito se ausente/inválido), nunca um fallback silencioso pra Free Mode. */
+  companyId?: string;
+  input: StudioBriefInput;
+  assets: { references: StudioImageAssetInputBody[]; protectedAssets: StudioImageAssetInputBody[] };
+  qaMode?: "dry_run";
+  qaImageModel?: "gpt-image-2.5-sunburst";
+  qaImageQuality?: "high";
+}
