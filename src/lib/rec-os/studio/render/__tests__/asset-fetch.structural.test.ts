@@ -229,6 +229,23 @@ test("[16] URL HTTPS pública válida -- pipeline completo funciona (fetch real 
   assert.equal(result.contentType, "image/png");
 });
 
+test("[FASE 31M] Content-Type image/svg+xml é aceito (logos oficiais são frequentemente SVG -- sharp já decodifica nativamente)", async (t) => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (t.mock.module as any)("node:dns/promises", { exports: { lookup: async () => [{ address: "8.8.8.8", family: 4 }] } });
+  const svg = new TextEncoder().encode(`<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><rect width="10" height="10" fill="red"/></svg>`);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (t.mock.module as any)("undici", {
+    exports: {
+      Agent: class { close() { return Promise.resolve(); } },
+      fetch: async () => new Response(svg, { status: 200, headers: { "content-type": "image/svg+xml; charset=utf-8", "content-length": String(svg.length) } }),
+    },
+  });
+  const mod = await import(`../asset-fetch.ts?t=${Date.now()}-${Math.random()}`);
+  const result = await mod.fetchAssetSafely("https://example-public.test/logo.svg");
+  assert.equal(result.ok, true, "image/svg+xml (com ou sem charset) nunca mais é rejeitado só por ser vetorial");
+  assert.equal(result.contentType, "image/svg+xml; charset=utf-8");
+});
+
 test("rejeita Content-Type que não é imagem conhecida", async (t) => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (t.mock.module as any)("node:dns/promises", { exports: { lookup: async () => [{ address: "8.8.8.8", family: 4 }] } });

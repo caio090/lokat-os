@@ -34,7 +34,17 @@ import ipaddr from "ipaddr.js";
 
 const FETCH_TIMEOUT_MS = 8_000;
 const MAX_BYTES = 8_000_000; // ~8MB
-const ALLOWED_CONTENT_TYPES = /^image\/(png|jpe?g|webp|gif)/i;
+/**
+ * FASE 31M §5 -- logos oficiais de marca são frequentemente SVG
+ * (vetorial); `sharp` (usado pelo compositor real, render/compositor.ts)
+ * já decodifica SVG nativamente e o rasteriza preservando alpha
+ * (confirmado localmente, sem rede: `sharp(svgBuffer).resize(...).png()`
+ * funciona sem nenhuma dependência nova) -- o único bloqueio real era
+ * este allowlist nunca ter incluído `image/svg+xml`. `+xml` no fim é
+ * opcional (alguns servidores devolvem `image/svg+xml; charset=utf-8`,
+ * outros só `image/svg+xml`).
+ */
+const ALLOWED_CONTENT_TYPES = /^image\/(png|jpe?g|webp|gif|svg\+xml)/i;
 
 export interface AssetFetchResult {
   ok: boolean;

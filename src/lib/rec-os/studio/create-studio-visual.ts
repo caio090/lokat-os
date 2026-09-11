@@ -20,6 +20,7 @@
  * exposto pela API/UI, para o contrato continuar simples).
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
+import sharp from "sharp";
 import { executeStudioSkill } from "./execute";
 import type { StudioSkillExecutionResult } from "./runtime";
 import type { StudioBriefInput } from "./types";
@@ -32,8 +33,11 @@ import { buildStudioRenderPlan } from "./render/render-plan";
 import { composeStudioVisual, type ProtectedAssetBytes } from "./render/compositor";
 import { fetchAssetSafely } from "./render/asset-fetch";
 import { decodeImageDataUrl } from "./render/data-url";
-import type { StudioProtectedAssetRole, StudioVisualResult } from "./render/types";
+import type { StudioProtectedAssetRole, StudioVisualResult, StudioLogoDiagnostics } from "./render/types";
 import { parseStudioTextDirectives, resolveFinalText } from "./text-directives";
+
+/** FASE 31M -- id fixo já usado pelo auto-add da logo oficial (linha abaixo); usado aqui só para identificar ESSE asset específico no diagnóstico, nunca para lógica de negócio nova. */
+const OFFICIAL_LOGO_ASSET_ID = "company-logo";
 
 export interface CreateStudioVisualRequest {
   skillId: string;
@@ -65,7 +69,7 @@ function nowIso(): string {
  *  usuário) decodifica direto; https: (hoje só o logo oficial resolvido
  *  a partir de onboarding_profiles) passa pelo fetch SSRF-safe. Nunca
  *  lança -- asset que não puder ser resolvido é omitido com warning. */
-async function resolveProtectedAssetBytes(asset: StudioImageAsset): Promise<{ bytes: Buffer; warning?: string } | { bytes: null; warning: string }> {
+async function resolveProtectedAssetBytes(asset: StudioImageAsset): Promise<{ bytes: Buffer; contentType?: string; warning?: string } | { bytes: null; contentType?: undefined; warning: string }> {
   if (asset.url.startsWith("data:")) {
     const bytes = decodeImageDataUrl(asset.url);
     if (!bytes) return { bytes: null, warning: `Ativo protegido "${asset.label}" não pôde ser decodificado -- omitido desta peça.` };
@@ -75,7 +79,7 @@ async function resolveProtectedAssetBytes(asset: StudioImageAsset): Promise<{ by
   if (!fetched.ok || !fetched.bytes) {
     return { bytes: null, warning: `Ativo protegido "${asset.label}" não pôde ser carregado (${fetched.error ?? "erro desconhecido"}) -- peça gerada sem ele.` };
   }
-  return { bytes: fetched.bytes };
+  return { bytes: fetched.bytes, contentType: fetched.contentType };
 }
 
 async function resolveBackgroundBytes(imageUrl: string): Promise<Buffer | null> {
@@ -113,12 +117,39 @@ export async function createStudioVisual(request: CreateStudioVisualRequest): Pr
   }
   const output = textResult.output;
 
+  // FASE 31M -- traço seguro do caminho da logo oficial, só populado em
+  // Company Mode (companyId real); nunca bytes/base64/URL completa.
+  // Preenchido incrementalmente conforme o pipeline avança -- qualquer
+  // return antecipado leva o estado JÁ CONHECIDO até aquele ponto,
+  // nunca inventa um valor pra um estágio ainda não alcançado.
+  const logoDiag: StudioLogoDiagnostics | undefined = request.companyId
+    ? {
+        companyIdentityPresent: !!context.identity,
+        logoUrlPresent: !!context.identity?.logoUrl,
+        logoAssetAutoAdded: false,
+        protectedAssetsInputCount: request.assets.protectedAssets.length,
+        protectedAssetsAfterAutoAddCount: request.assets.protectedAssets.length,
+        logoFetchAttempted: false,
+        logoFetchSucceeded: false,
+        logoMimeType: null,
+        logoDimensions: null,
+        logoBytesPresent: false,
+        renderPlanLogoPresent: false,
+        compositorLogoOverlayPresent: false,
+        logoRendered: false,
+      }
+    : undefined;
+
   // Fase 15 (V0.3) -- logo oficial da Company (quando existir DNA real)
   // é SEMPRE tratada como PROTECTED e com role "logo", automaticamente.
   const protectedAssets: StudioImageAsset[] = request.assets.protectedAssets.map((a) => ({ ...a, role: a.role ?? "product" }));
   const officialLogo = context.identity?.logoUrl;
   if (officialLogo && !protectedAssets.some((a) => a.url === officialLogo)) {
-    protectedAssets.push({ id: "company-logo", label: "Logo oficial da Company", kind: "protected", url: officialLogo, role: "logo" });
+    protectedAssets.push({ id: OFFICIAL_LOGO_ASSET_ID, label: "Logo oficial da Company", kind: "protected", url: officialLogo, role: "logo" });
+    if (logoDiag) {
+      logoDiag.logoAssetAutoAdded = true;
+      logoDiag.protectedAssetsAfterAutoAddCount = protectedAssets.length;
+    }
   }
 
   const backgroundResult = await generateStudioImage({
@@ -142,6 +173,7 @@ export async function createStudioVisual(request: CreateStudioVisualRequest): Pr
         error: backgroundResult.error,
         generatedAt: nowIso(),
         diagnostics: backgroundResult.diagnostics,
+        logoDiagnostics: logoDiag,
       },
     };
   }
@@ -168,6 +200,9 @@ export async function createStudioVisual(request: CreateStudioVisualRequest): Pr
     ctaStyle: output.ctaStyle,
   });
   pipelineWarnings.push(...renderPlan.renderWarnings);
+  if (logoDiag) {
+    logoDiag.renderPlanLogoPresent = renderPlan.protectedAssets.some((a) => a.role === "logo");
+  }
 
   const backgroundBytes = await resolveBackgroundBytes(backgroundResult.image.url);
   if (!backgroundBytes) {
@@ -178,6 +213,7 @@ export async function createStudioVisual(request: CreateStudioVisualRequest): Pr
         warnings: pipelineWarnings,
         error: { code: "STUDIO_RENDER_FAILED", message: "O background gerado não pôde ser recuperado para composição." },
         generatedAt: nowIso(),
+        logoDiagnostics: logoDiag,
       },
     };
   }
@@ -186,9 +222,31 @@ export async function createStudioVisual(request: CreateStudioVisualRequest): Pr
   for (const assetLayer of renderPlan.protectedAssets) {
     const source = protectedAssets.find((a) => a.id === assetLayer.assetId);
     if (!source) continue;
+    const isOfficialLogo = logoDiag && assetLayer.assetId === OFFICIAL_LOGO_ASSET_ID;
+    if (isOfficialLogo) logoDiag!.logoFetchAttempted = true;
     const resolved = await resolveProtectedAssetBytes(source);
-    if (resolved.warning) pipelineWarnings.push(resolved.warning);
-    if (resolved.bytes) protectedAssetBytes.push({ assetId: assetLayer.assetId, bytes: resolved.bytes });
+    if (resolved.warning) {
+      pipelineWarnings.push(resolved.warning);
+      if (isOfficialLogo) logoDiag!.logoFailureReason = resolved.warning;
+    }
+    if (resolved.bytes) {
+      protectedAssetBytes.push({ assetId: assetLayer.assetId, bytes: resolved.bytes });
+      if (isOfficialLogo) {
+        logoDiag!.logoFetchSucceeded = true;
+        logoDiag!.logoBytesPresent = true;
+        logoDiag!.logoMimeType = resolved.contentType ?? null;
+        // FASE 31M §3 -- best-effort, nunca lança (metadata segura, nunca bytes/base64).
+        try {
+          const meta = await sharp(resolved.bytes).metadata();
+          if (meta.width && meta.height) logoDiag!.logoDimensions = { width: meta.width, height: meta.height };
+        } catch {
+          // dimensões indisponíveis -- nunca bloqueia a composição por isso.
+        }
+      }
+    }
+  }
+  if (logoDiag) {
+    logoDiag.compositorLogoOverlayPresent = protectedAssetBytes.some((a) => a.assetId === OFFICIAL_LOGO_ASSET_ID);
   }
 
   const composed = await composeStudioVisual({ backgroundBytes, renderPlan, protectedAssetBytes });
@@ -200,8 +258,12 @@ export async function createStudioVisual(request: CreateStudioVisualRequest): Pr
         warnings: pipelineWarnings,
         error: { code: "STUDIO_RENDER_FAILED", message: composed.error },
         generatedAt: nowIso(),
+        logoDiagnostics: logoDiag,
       },
     };
+  }
+  if (logoDiag) {
+    logoDiag.logoRendered = logoDiag.compositorLogoOverlayPresent;
   }
 
   return {
@@ -219,6 +281,7 @@ export async function createStudioVisual(request: CreateStudioVisualRequest): Pr
       warnings: pipelineWarnings,
       generatedAt: nowIso(),
       diagnostics: backgroundResult.diagnostics,
+      logoDiagnostics: logoDiag,
     },
   };
 }

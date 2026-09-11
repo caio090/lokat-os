@@ -281,6 +281,86 @@ test("[P1-9] regenerate (mesma chamada com o mesmo input) preserva a headline ex
   assert.equal(texts[1], "HOJE ATÉ MAIS TARDE", "regenerar com o mesmo input produz a mesma headline, nunca reinterpretada");
 });
 
+test("[FASE 31M] logoDiagnostics -- Company com logoUrl: presente/auto-add/fetch/render plan/compositor, tudo true", async (t) => {
+  const businessContext = { company: { id: "c1", name: "Empresa A" }, identity: { brandName: "A", logoUrl: "https://cdn.example.com/logo.png", brandColors: null, visualStyle: null, visualReferences: null }, brand: null, market: null, products: null };
+  const { createStudioVisual } = await loadOrchestratorWith(t, { businessContext, fetchAssetResult: { ok: true, bytes: Buffer.from("fake-logo-bytes"), contentType: "image/png" } });
+  const result = await createStudioVisual({
+    skillId: "vidigal_png", input: { freeformBrief: "teste" },
+    companyId: "c1", companyName: "Empresa A", assets: { references: [], protectedAssets: [] },
+    db: {} as never,
+  });
+  const diag = result.image?.logoDiagnostics;
+  assert.ok(diag, "[3] diagnóstico presente em Company Mode");
+  assert.equal(diag?.companyIdentityPresent, true);
+  assert.equal(diag?.logoUrlPresent, true);
+  assert.equal(diag?.logoAssetAutoAdded, true);
+  assert.equal(diag?.protectedAssetsInputCount, 0);
+  assert.equal(diag?.protectedAssetsAfterAutoAddCount, 1, "[3] contagem sobe de 0 pra 1 com o auto-add");
+  assert.equal(diag?.logoFetchAttempted, true);
+  assert.equal(diag?.logoFetchSucceeded, true);
+  assert.equal(diag?.logoBytesPresent, true);
+  assert.equal(diag?.logoMimeType, "image/png");
+  assert.equal(diag?.renderPlanLogoPresent, true, "[7] render plan contém a logo");
+  assert.equal(diag?.compositorLogoOverlayPresent, true, "[8] compositor recebe a logo");
+  assert.equal(diag?.logoRendered, true);
+  assert.equal(diag?.logoFailureReason, undefined, "nenhuma falha -- nenhum motivo registrado");
+});
+
+test("[FASE 31M] logoDiagnostics -- Company SEM logoUrl (caso real Duh Lanches): tudo false/null, sem tentar fetch", async (t) => {
+  const businessContext = { company: { id: "c1", name: "Duh Lanches" }, identity: { brandName: "Duh Lanches", logoUrl: null, brandColors: null, visualStyle: null, visualReferences: null }, brand: null, market: null, products: null };
+  const { createStudioVisual } = await loadOrchestratorWith(t, { businessContext });
+  const result = await createStudioVisual({
+    skillId: "vidigal_png", input: { freeformBrief: "teste" },
+    companyId: "c1", companyName: "Duh Lanches", assets: { references: [], protectedAssets: [] },
+    db: {} as never,
+  });
+  const diag = result.image?.logoDiagnostics;
+  assert.equal(diag?.companyIdentityPresent, true, "identity existe (onboarding parcial), só a logo está ausente");
+  assert.equal(diag?.logoUrlPresent, false, "exatamente o caso real: identity presente, logoUrl ausente");
+  assert.equal(diag?.logoAssetAutoAdded, false);
+  assert.equal(diag?.logoFetchAttempted, false, "nunca tenta buscar uma URL que não existe");
+  assert.equal(diag?.renderPlanLogoPresent, false);
+  assert.equal(diag?.compositorLogoOverlayPresent, false);
+  assert.equal(diag?.logoRendered, false);
+});
+
+test("[FASE 31M] logoDiagnostics -- ausente em Free Mode (companyId null), nunca um objeto vazio/enganoso", async (t) => {
+  const { createStudioVisual } = await loadOrchestratorWith(t, {});
+  const result = await createStudioVisual({
+    skillId: "vidigal_png", input: { freeformBrief: "teste" },
+    companyId: null, companyName: null, assets: { references: [], protectedAssets: [] },
+    db: {} as never,
+  });
+  assert.equal(result.image?.logoDiagnostics, undefined, "Free Mode nunca finge ter um contexto de Company/logo");
+});
+
+test("[FASE 31M/11] logoDiagnostics -- fetch da logo falha: LOGO_ASSET_FAILED equivalente (logoFailureReason seguro), geração continua", async (t) => {
+  const businessContext = {
+    company: { id: "c1", name: "Empresa A" },
+    identity: { brandName: "A", logoUrl: "https://attacker.example/ssrf-payload.png", brandColors: null, visualStyle: null, visualReferences: null },
+    brand: null, market: null, products: null,
+  };
+  const { createStudioVisual } = await loadOrchestratorWith(t, {
+    businessContext,
+    fetchAssetResult: { ok: false, error: "Host resolve para um endereço não permitido." },
+  });
+  const result = await createStudioVisual({
+    skillId: "vidigal_png", input: { freeformBrief: "teste" },
+    companyId: "c1", companyName: "Empresa A", assets: { references: [], protectedAssets: [] },
+    db: {} as never,
+  });
+  const diag = result.image?.logoDiagnostics;
+  assert.equal(diag?.logoUrlPresent, true);
+  assert.equal(diag?.logoAssetAutoAdded, true);
+  assert.equal(diag?.logoFetchAttempted, true);
+  assert.equal(diag?.logoFetchSucceeded, false, "[10] fail loud -- nunca fica indistinguível de 'nunca tentou'");
+  assert.equal(diag?.logoBytesPresent, false);
+  assert.equal(diag?.compositorLogoOverlayPresent, false);
+  assert.equal(diag?.logoRendered, false);
+  assert.ok(diag?.logoFailureReason?.includes("Logo"), "[10] motivo seguro e específico (nunca a URL do atacante nem detalhe interno)");
+  assert.equal(result.image?.status, "completed", "logo indisponível nunca derruba a geração inteira");
+});
+
 test("[P1-10] Company DNA não sobrescreve headline explícita mesmo quando o tom de marca diverge", async (t) => {
   const businessContext = {
     company: { id: "c1", name: "Empresa Informal" },

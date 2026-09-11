@@ -96,4 +96,32 @@ export interface StudioVisualResult {
   generatedAt: string;
   /** FASE 31K §5/11 -- model/quality/size/duration/usage reais do provider, nunca mais descartados. */
   diagnostics?: ImageGenerationDiagnostics;
+  /** FASE 31M §3 -- só presente em Company Mode (companyId real). Nunca bytes/base64/URL sensível -- só booleanos/contagens/metadata segura, pra QA administrativo descobrir em que estágio a logo oficial deixou de existir sem precisar consultar o banco. */
+  logoDiagnostics?: StudioLogoDiagnostics;
+}
+
+/**
+ * FASE 31M (Logo Protected Asset Pipeline) — traço seguro do caminho
+ * completo da logo oficial (business context -> auto-add -> fetch ->
+ * render plan -> compositor). Todo campo é booleano/contagem/metadata
+ * não sensível -- nunca bytes, nunca base64, nunca a URL completa
+ * (irrelevante aqui: a URL da logo não é secreta, mas mesmo assim
+ * nunca exposta por completo neste diagnóstico, por princípio).
+ */
+export interface StudioLogoDiagnostics {
+  companyIdentityPresent: boolean;
+  logoUrlPresent: boolean;
+  logoAssetAutoAdded: boolean;
+  protectedAssetsInputCount: number;
+  protectedAssetsAfterAutoAddCount: number;
+  logoFetchAttempted: boolean;
+  logoFetchSucceeded: boolean;
+  logoMimeType: string | null;
+  logoDimensions: { width: number; height: number } | null;
+  logoBytesPresent: boolean;
+  renderPlanLogoPresent: boolean;
+  compositorLogoOverlayPresent: boolean;
+  logoRendered: boolean;
+  /** Motivo seguro (nunca stack trace/secret) só quando algo no caminho da logo falhou -- FASE 31M §10 (LOGO_ASSET_FAILED). */
+  logoFailureReason?: string;
 }
