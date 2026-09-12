@@ -171,6 +171,7 @@ export function AttachmentUploader({
         </div>
         {!disabled && (
           <button
+            type="button"
             onClick={() => { onChange(null); setLinkInput(""); }}
             className="p-1 rounded-lg hover:bg-emerald-200 text-emerald-600 flex-shrink-0 transition-colors"
             title="Remover"
@@ -191,6 +192,7 @@ export function AttachmentUploader({
       {/* Tabs */}
       <div className="flex rounded-xl overflow-hidden border border-gray-200 w-fit">
         <button
+          type="button"
           onClick={() => { setTab("link"); setUploadErr(null); }}
           disabled={disabled}
           className={cn(
@@ -203,6 +205,7 @@ export function AttachmentUploader({
           <Link2 className="w-3 h-3" /> Link
         </button>
         <button
+          type="button"
           onClick={() => { setTab("upload"); setUploadErr(null); }}
           disabled={disabled}
           className={cn(
