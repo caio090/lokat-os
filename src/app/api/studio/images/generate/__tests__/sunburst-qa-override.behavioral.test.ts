@@ -51,9 +51,14 @@ async function loadRouteWith(t: TestContext, opts: {
   (t.mock.module as any)("@/lib/auth/get-current-user", {
     exports: { getCurrentUser: async () => (opts.currentUser === undefined ? { id: "user-1" } : opts.currentUser) },
   });
+  // FASE 31P (Company Branding Gate) -- override Sunburst é geração
+  // REAL (nunca dry-run), então também exige logo_url presente.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (t.mock.module as any)("@/lib/supabase/server", {
-    exports: { createServerSupabaseClient: async () => ({}), createSupabaseAdminClient: () => ({}) },
+    exports: {
+      createServerSupabaseClient: async () => ({ from: () => ({ select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: { logo_url: "https://cdn.example.com/logo.png" }, error: null }) }) }) }) }),
+      createSupabaseAdminClient: () => ({ from: () => ({ select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: { logo_url: "https://cdn.example.com/logo.png" }, error: null }) }) }) }) }),
+    },
   });
   // Mesma armadilha de cache transitivo documentada em production-qa-mode.behavioral.test.ts
   // (production-qa-authorization.ts importa @/lib/supabase/server -> next/headers).

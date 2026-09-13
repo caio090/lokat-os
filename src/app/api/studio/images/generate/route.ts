@@ -4,6 +4,7 @@ import { getCurrentUser } from "@/lib/auth/get-current-user";
 import { createServerSupabaseClient, createSupabaseAdminClient } from "@/lib/supabase/server";
 import { withMutationProtection } from "@/lib/workspaces/assert-not-preview";
 import { createStudioVisual } from "@/lib/rec-os/studio/create-studio-visual";
+import { buildStudioCreativeBusinessContext } from "@/lib/rec-os/studio/business-context";
 import { createStudioVisualDryRun, isDryRunActive, isFullZeroCostDryRun } from "@/lib/rec-os/studio/dry-run";
 import { isProductionQaFlagEnabled, evaluateProductionQaAccess, resolveRoleForCurrentUser } from "@/lib/rec-os/studio/production-qa-authorization";
 import { canAccessPlatformCentral } from "@/lib/access-control";
@@ -342,6 +343,35 @@ export const POST = withMutationProtection(async function POST(request: NextRequ
     const previewDryRun = isDryRunActive();
     const dryRun = previewDryRun || productionQaAuthorized;
     const fullZeroCost = productionQaAuthorized ? true : isFullZeroCostDryRun();
+
+    // FASE 31P (Company Branding Gate) -- decisão de produto: Company
+    // Mode SEMPRE prioriza a identidade oficial da Company, então uma
+    // geração REAL (nunca dry_run -- esse caminho já é usado de
+    // propósito por FASE 31M/testes pra exercitar o cenário "sem logo")
+    // em Company Mode exige `identity.logoUrl` presente ANTES de
+    // qualquer chamada ao provider de IA (nunca gasta crédito pra só
+    // então falhar). O front-end (_studio-execution-form.tsx) já
+    // desabilita o botão "Criar arte" nesse caso -- este check é o
+    // backstop autoritativo, cobrindo também o caminho de Série
+    // (_series-workspace-panel.tsx chama esta MESMA rota por item) e
+    // qualquer tentativa de burlar o gate só pelo front/DevTools.
+    if (resolvedCompanyId && !dryRun) {
+      const context = await buildStudioCreativeBusinessContext(db, resolvedCompanyId, resolvedCompanyName);
+      if (!context.identity?.logoUrl) {
+        console.info("[api/studio/images/generate] geração bloqueada -- Company Mode sem logo oficial", {
+          companyId: resolvedCompanyId, companyName: resolvedCompanyName,
+        });
+        return NextResponse.json(
+          {
+            ok: false,
+            error: "Cadastre a logo oficial da empresa para continuar.",
+            code: "STUDIO_COMPANY_LOGO_REQUIRED",
+          },
+          { status: 409 },
+        );
+      }
+    }
+
     const result = dryRun
       ? await createStudioVisualDryRun({
           skillId, input, companyId: resolvedCompanyId, companyName: resolvedCompanyName, assets, db,

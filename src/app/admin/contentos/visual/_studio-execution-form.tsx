@@ -1,11 +1,12 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   Loader2, AlertTriangle, Sparkles, Download, RefreshCw, Wand2, ChevronDown, ChevronUp, X, Building2, UserRound,
-  Maximize2, Grid3x3, Square, PenLine, ArrowRight, FlaskConical,
+  Maximize2, Grid3x3, Square, PenLine, ArrowRight, FlaskConical, CheckCircle2,
 } from "lucide-react";
+import { AttachmentUploader, type AttachmentValue } from "@/components/attachment-uploader";
 import type { DesignFormat } from "@/lib/providers/shared/types";
 import { VIDIGAL_PNG_DELIVERY_STEPS } from "@/lib/rec-os/studio/skills/vidigal-png/instructions";
 import type { VidigalPngOutputContract } from "@/lib/rec-os/studio/skills/vidigal-png/output";
@@ -141,6 +142,82 @@ export function StudioExecutionForm({
   const referenceInputRef = useRef<HTMLInputElement>(null);
   const protectedInputRef = useRef<HTMLInputElement>(null);
   const fromCreate = isStudioLaunchedFromCreate(launchContext);
+
+  // FASE 31P (Company Branding Gate) -- Company Mode SEMPRE prioriza a
+  // identidade oficial: ao entrar em mode="company" com uma Company
+  // selecionada, verifica context.identity.logoUrl (via o mesmo GET já
+  // usado pelo editor /admin/empresa/dna, FASE 31O -- nenhuma rota
+  // nova). Ausente = geração bloqueada até o upload inline. A checagem
+  // AUTORITATIVA real fica no servidor (route.ts) -- isto é só UX,
+  // igual ao Modo QA/Sunburst QA acima.
+  const [companyLogoStatus, setCompanyLogoStatus] = useState<"idle" | "loading" | "present" | "absent" | "error">("idle");
+  const [companyLogoUrl, setCompanyLogoUrl] = useState<string | null>(null);
+  const [logoUploadValue, setLogoUploadValue] = useState<AttachmentValue | null>(null);
+  const [logoSwapOpen, setLogoSwapOpen] = useState(false);
+  const [logoSaving, setLogoSaving] = useState(false);
+  const [logoSaveError, setLogoSaveError] = useState<string | null>(null);
+
+  async function fetchCompanyLogoStatus(id: string) {
+    setCompanyLogoStatus("loading");
+    try {
+      const res = await fetch(`/api/admin/clients/${encodeURIComponent(id)}/onboarding-profile`);
+      if (!res.ok) { setCompanyLogoStatus("error"); return; }
+      const data = await res.json().catch(() => null);
+      const url = (data?.profile?.logo_url as string | null | undefined) ?? null;
+      setCompanyLogoUrl(url);
+      setCompanyLogoStatus(url ? "present" : "absent");
+    } catch {
+      setCompanyLogoStatus("error");
+    }
+  }
+
+  // Company Mode + Company selecionada -> reavalia a logo sempre que a
+  // Company muda (nunca reaproveita o resultado da Company anterior);
+  // Free Mode nunca aciona este gate.
+  useEffect(() => {
+    if (mode === "company" && clientId) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- mesmo padrão já usado em company-context-bar.tsx: "loading" precisa ser setado antes do fetch disparar.
+      void fetchCompanyLogoStatus(clientId);
+    } else {
+      setCompanyLogoStatus("idle");
+      setCompanyLogoUrl(null);
+    }
+    setLogoUploadValue(null);
+    setLogoSwapOpen(false);
+    setLogoSaveError(null);
+  }, [mode, clientId]);
+
+  async function saveCompanyLogo() {
+    if (!clientId || !logoUploadValue?.url) return;
+    setLogoSaving(true);
+    setLogoSaveError(null);
+    try {
+      const res = await fetch(`/api/admin/clients/${encodeURIComponent(clientId)}/onboarding-profile`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ logo_url: logoUploadValue.url }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        setLogoSaveError(typeof data?.error === "string" ? data.error : "Não foi possível salvar a logo agora.");
+        setLogoSaving(false);
+        return;
+      }
+      setLogoUploadValue(null);
+      setLogoSwapOpen(false);
+      await fetchCompanyLogoStatus(clientId); // FASE 31P §6 -- revalida o Company Context sem exigir reload manual.
+    } catch {
+      setLogoSaveError("Erro de conexão ao salvar a logo.");
+    }
+    setLogoSaving(false);
+  }
+
+  // FASE 31P §7/8 -- enquanto Company Mode + Company selecionada e a
+  // logo não estiver confirmada PRESENTE (ausente/carregando/erro conta
+  // como bloqueado -- fail closed, nunca libera por omissão), a geração
+  // fica bloqueada. Nenhum "Continuar sem logo": a única saída é
+  // cadastrar a logo.
+  const brandingGateBlocking = mode === "company" && !!clientId && companyLogoStatus !== "present";
 
   async function handleAddAsset(kind: "reference" | "protected", fileList: FileList | null) {
     const file = fileList?.[0];
@@ -452,13 +529,32 @@ export function StudioExecutionForm({
         </label>
       )}
 
+      {/* FASE 31P (Company Branding Gate) -- só em Company Mode com Company selecionada; Free Mode nunca exibe/exige isto. Estruturado como o primeiro item de um futuro "BRAND ASSETS" (paleta, fontes, fotos, produtos, referências) -- só Logo é obrigatória por enquanto. */}
+      {mode === "company" && clientId && (
+        <CompanyBrandingSection
+          status={companyLogoStatus}
+          logoUrl={companyLogoUrl}
+          uploadValue={logoUploadValue}
+          onUploadChange={setLogoUploadValue}
+          swapOpen={logoSwapOpen}
+          onToggleSwap={() => { setLogoSwapOpen((v) => !v); setLogoUploadValue(null); setLogoSaveError(null); }}
+          onSave={() => void saveCompanyLogo()}
+          onRetry={() => clientId && void fetchCompanyLogoStatus(clientId)}
+          saving={logoSaving}
+          saveError={logoSaveError}
+        />
+      )}
+
       {quantity === 1 ? (
         <>
-          <button type="button" onClick={handleSubmit} disabled={status === "preparing" || !freeformBrief.trim()}
+          <button type="button" onClick={handleSubmit} disabled={status === "preparing" || !freeformBrief.trim() || brandingGateBlocking}
             className="text-xs font-bold bg-purple-600 text-white px-4 py-2.5 rounded-xl disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed flex items-center gap-1.5">
             {status === "preparing" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Wand2 className="w-3.5 h-3.5" />}
             {status === "preparing" ? LOADING_STEPS[loadingStep] : "Criar arte"}
           </button>
+          {brandingGateBlocking && companyLogoStatus === "absent" && (
+            <p className="text-[11px] font-bold text-amber-600">Cadastre a logo oficial da empresa para continuar.</p>
+          )}
 
           {status === "ai_unavailable" && (
             <StatusBanner tone="amber" text="IA indisponível no momento — o provider de direção criativa não está configurado ou não respondeu. Tente novamente mais tarde." />
@@ -475,6 +571,7 @@ export function StudioExecutionForm({
           clientId={mode === "company" ? clientId : null} format={format} freeformBrief={freeformBrief}
           quantity={quantity}
           launchContext={launchContext}
+          disabled={brandingGateBlocking}
         />
       )}
 
@@ -591,6 +688,91 @@ export function StudioExecutionForm({
               </div>
             </div>
           )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * FASE 31P (Company Branding Gate) -- "IDENTIDADE DA EMPRESA": hoje só
+ * a Logo é obrigatória; a estrutura (wrapper + uma linha por asset) já
+ * comporta futuras linhas (Paleta, Fontes, Fotos, Produtos,
+ * Referências -- item 15 da fase) sem precisar refatorar, mas essas
+ * linhas NÃO são implementadas agora (nenhuma delas é obrigatória
+ * ainda). Reaproveita AttachmentUploader (já corrigido na FASE 31O.2)
+ * -- nenhum uploader novo.
+ */
+function CompanyBrandingSection({
+  status, logoUrl, uploadValue, onUploadChange, swapOpen, onToggleSwap, onSave, onRetry, saving, saveError,
+}: {
+  status: "idle" | "loading" | "present" | "absent" | "error";
+  logoUrl: string | null;
+  uploadValue: AttachmentValue | null;
+  onUploadChange: (v: AttachmentValue | null) => void;
+  swapOpen: boolean;
+  onToggleSwap: () => void;
+  onSave: () => void;
+  onRetry: () => void;
+  saving: boolean;
+  saveError: string | null;
+}) {
+  return (
+    <div className="border border-gray-100 rounded-xl p-3 space-y-2" data-testid="company-branding-section">
+      <p className="text-[10px] font-black uppercase tracking-wide text-gray-400">Identidade da empresa</p>
+
+      {status === "loading" && (
+        <div className="flex items-center gap-2 text-xs text-gray-400">
+          <Loader2 className="w-3.5 h-3.5 animate-spin" /> Verificando identidade da empresa…
+        </div>
+      )}
+
+      {status === "error" && (
+        <div className="bg-red-50 border border-red-100 rounded-xl p-3 flex items-center justify-between gap-2">
+          <p className="text-[11px] text-red-600">Não foi possível verificar a identidade da empresa.</p>
+          <button type="button" onClick={onRetry} className="text-[11px] font-bold text-red-700 shrink-0">Tentar novamente</button>
+        </div>
+      )}
+
+      {status === "present" && (
+        <div>
+          <div className="flex items-center gap-3">
+            {logoUrl && (
+              // eslint-disable-next-line @next/next/no-img-element -- logo oficial vem do Company DNA (URL externa/storage), nunca um asset local
+              <img src={logoUrl} alt="Logo oficial da empresa" className="w-10 h-10 rounded-lg object-contain border border-gray-100 bg-white shrink-0" />
+            )}
+            <p className="flex-1 text-xs font-bold text-emerald-700 flex items-center gap-1">
+              <CheckCircle2 className="w-3.5 h-3.5" /> Logo oficial carregada
+            </p>
+            <button type="button" onClick={onToggleSwap} className="text-[10px] font-bold text-purple-600 shrink-0">
+              {swapOpen ? "Cancelar" : "Trocar logo"}
+            </button>
+          </div>
+          {swapOpen && (
+            <div className="mt-2 space-y-2 border-t border-gray-100 pt-2">
+              <AttachmentUploader value={uploadValue} onChange={onUploadChange} label="Nova logo oficial" />
+              <button type="button" onClick={onSave} disabled={!uploadValue?.url || saving}
+                className="text-[11px] font-bold bg-purple-600 text-white px-3 py-1.5 rounded-lg disabled:bg-gray-200 disabled:text-gray-400 flex items-center gap-1.5">
+                {saving && <Loader2 className="w-3 h-3 animate-spin" />} Salvar nova logo
+              </button>
+              {saveError && <p className="text-[10px] text-red-600">{saveError}</p>}
+            </div>
+          )}
+        </div>
+      )}
+
+      {status === "absent" && (
+        <div className="bg-amber-50 border border-amber-100 rounded-xl p-3 space-y-2">
+          <p className="text-xs font-black text-amber-800 uppercase tracking-wide flex items-center gap-1.5">
+            <AlertTriangle className="w-3.5 h-3.5" /> Logo oficial não cadastrada
+          </p>
+          <p className="text-[11px] text-amber-700">Adicione a logo oficial desta empresa antes de criar peças visuais.</p>
+          <AttachmentUploader value={uploadValue} onChange={onUploadChange} label="Logo oficial (PNG, SVG ou WEBP)" />
+          <button type="button" onClick={onSave} disabled={!uploadValue?.url || saving}
+            className="text-[11px] font-bold bg-purple-600 text-white px-3 py-1.5 rounded-lg disabled:bg-gray-200 disabled:text-gray-400 flex items-center gap-1.5">
+            {saving && <Loader2 className="w-3 h-3 animate-spin" />} Salvar logo
+          </button>
+          {saveError && <p className="text-[10px] text-red-600">{saveError}</p>}
         </div>
       )}
     </div>

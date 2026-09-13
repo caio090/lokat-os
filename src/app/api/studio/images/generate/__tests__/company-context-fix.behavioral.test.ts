@@ -16,9 +16,16 @@ import assert from "node:assert/strict";
 (mock.module as any)("@/lib/workspaces/assert-not-preview", {
   exports: { withMutationProtection: (handler: (...args: unknown[]) => unknown) => handler },
 });
+// FASE 31P (Company Branding Gate) -- as fixtures deste arquivo testam
+// "Company Mode com sucesso", que agora exige logo_url presente.
+function fakeDbWithLogo() {
+  return {
+    from: () => ({ select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: { logo_url: "https://cdn.example.com/logo.png" }, error: null }) }) }) }),
+  };
+}
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 (mock.module as any)("@/lib/supabase/server", {
-  exports: { createServerSupabaseClient: async () => ({}), createSupabaseAdminClient: () => ({}) },
+  exports: { createServerSupabaseClient: async () => fakeDbWithLogo(), createSupabaseAdminClient: () => fakeDbWithLogo() },
 });
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 (mock.module as any)("@/lib/rec-os/studio/dry-run", {

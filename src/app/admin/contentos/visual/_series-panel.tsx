@@ -60,7 +60,7 @@ export function SeriesQuantityPicker({ value, onChange }: { value: CreativeSerie
 }
 
 export function SeriesPanel({
-  clientId, format, freeformBrief, quantity, launchContext,
+  clientId, format, freeformBrief, quantity, launchContext, disabled = false,
 }: {
   clientId: string | null;
   format: DesignFormat;
@@ -68,6 +68,8 @@ export function SeriesPanel({
   quantity: CreativeSeriesSize;
   /** FASE 17/37 -- usado só pra construir a URL do workspace (content_id/campaign_id/social_profile_id/source_format/return_to), nunca pra decidir qual série mostrar aqui. */
   launchContext: StudioLaunchContext;
+  /** FASE 31P (Company Branding Gate) -- true quando Company Mode exige logo oficial e ela ainda não existe; bloqueia "Criar série" pelo mesmo motivo do botão "Criar arte" (série usa a MESMA rota de geração por item -- ver _series-workspace-panel.tsx --, então sem isto o gate seria contornável criando uma série em vez de uma peça única). Checagem real fica no servidor -- isto é só UX. */
+  disabled?: boolean;
 }) {
   const router = useRouter();
   const [creating, setCreating] = useState(false);
@@ -92,7 +94,7 @@ export function SeriesPanel({
         <p className="text-xs text-purple-700">
           {quantity === 1 ? "Cria a estrutura da peça." : `Cria a estrutura da série com ${quantity} peças (nenhuma geração começa ainda).`}
         </p>
-        <button type="button" onClick={() => void createSeries()} disabled={!freeformBrief.trim() || creating}
+        <button type="button" onClick={() => void createSeries()} disabled={!freeformBrief.trim() || creating || disabled}
           className="text-xs font-bold bg-purple-600 text-white px-4 py-2 rounded-xl disabled:bg-gray-200 disabled:text-gray-400 flex items-center gap-1.5 shrink-0">
           {creating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
           {quantity === 1 ? "Criar peça" : "Criar série"}

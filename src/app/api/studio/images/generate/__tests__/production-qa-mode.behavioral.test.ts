@@ -71,11 +71,14 @@ async function loadRouteWith(t: TestContext, opts: {
   (t.mock.module as any)("@/lib/auth/get-current-user", {
     exports: { getCurrentUser: async () => (opts.currentUser === undefined ? { id: "user-1" } : opts.currentUser) },
   });
+  // FASE 31P (Company Branding Gate) -- caminho normal (não dry-run) em
+  // Company Mode agora exige logo_url presente; dry-run é exento do
+  // gate, então esta fixture não afeta os testes de qaMode=dry_run.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (t.mock.module as any)("@/lib/supabase/server", {
     exports: {
-      createServerSupabaseClient: async () => ({}),
-      createSupabaseAdminClient: () => ({}),
+      createServerSupabaseClient: async () => ({ from: () => ({ select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: { logo_url: "https://cdn.example.com/logo.png" }, error: null }) }) }) }) }),
+      createSupabaseAdminClient: () => ({ from: () => ({ select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: { logo_url: "https://cdn.example.com/logo.png" }, error: null }) }) }) }) }),
     },
   });
   // production-qa-authorization.ts é uma dependência TRANSITIVA de
