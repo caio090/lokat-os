@@ -77,7 +77,7 @@ export const MUX_TEST_VIDEO_2: RecVideo = {
 // publicamente). Playback ID: I5XRAObcrjynzumvWfGutXe00eFgt02et4fG9Xp3AVIew.
 export const MUX_TEST_VIDEO_3: RecVideo = {
   id: "mux-test-3",
-  title: "",
+  title: "Duh Lanches — Lanche da Madrugada",
   client_name: null,
   category: null,
   workType: "commercial",
@@ -221,6 +221,9 @@ export function applyEditorialOverride(video: RecVideo): RecVideo {
   }
   if (video.playbackId === MUX_DIA_DOS_PAIS.playbackId) {
     return { ...video, title: "Dia dos Pais", workType: "vt", workSubtype: "campaign-vt" };
+  }
+  if (video.playbackId === MUX_TEST_VIDEO_3.playbackId) {
+    return { ...video, title: "Duh Lanches — Lanche da Madrugada", workType: "commercial" };
   }
   return video;
 }

@@ -120,7 +120,7 @@ export function RecHero({
     // "+=NNvh" como string não estava resultando na distância esperada (o pin-spacer
     // ficava com só ~55px extras, não ~500px) — usar pixels calculados explicitamente
     // a partir de window.innerHeight elimina qualquer ambiguidade de parsing.
-    const pinDistance = () => window.innerHeight * (mobileNow ? 0.46 : 0.62);
+    const pinDistance = () => window.innerHeight * (mobileNow ? 0.30 : 0.46);
 
     // "Bump": sobe de 0→1 em [inStart,inEnd], segura em 1, desce de 1→0 em [outStart,outEnd].
     const bump = (p: number, inStart: number, inEnd: number, outStart: number, outEnd: number) => {

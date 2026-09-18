@@ -136,10 +136,10 @@ export default function LokatRecPage() {
         suficiente pra fechar o vão residual que sobra depois que o Hero termina de
         rolar naturalmente após o unpin, sem reintroduzir a "viewport quase vazia".
       */}
-      <div style={{ position: "relative", height: isMobile ? "230px" : "240px" }}>
-        <div style={{ position: "absolute", top: isMobile ? "1.4rem" : "1.6rem", left: "1.5rem", right: "1.5rem", zIndex: 1, textAlign: "center" }}>
-          <p style={{ ...R.display, fontSize: isMobile ? "1.25rem" : "1.45rem", lineHeight: 1.05, color: R.text, margin: 0 }}>
-            Seu projeto pode ser o próximo.
+      <div style={{ position: "relative", height: isMobile ? "210px" : "220px" }}>
+        <div style={{ position: "absolute", top: isMobile ? "1rem" : "1.2rem", left: "1.5rem", right: "1.5rem", zIndex: 1, textAlign: "center" }}>
+          <p style={{ ...R.display, fontSize: isMobile ? "clamp(1.7rem, 8vw, 2.35rem)" : "clamp(2rem, 4vw, 3.2rem)", lineHeight: .98, color: R.text, margin: 0 }}>
+            Seu <span style={{ color: R.red }}>projeto</span> pode ser o próximo.
           </p>
           <a
             href={whatsappUrl("Olá! Vim pelo site da LOKAT REC e queria conversar sobre um projeto.")}
