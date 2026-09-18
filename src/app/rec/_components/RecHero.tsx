@@ -31,6 +31,7 @@ export function RecHero({
   const kickerRef         = useRef<HTMLDivElement>(null);
   const ctaWrapRef        = useRef<HTMLDivElement>(null);
   const transitionRef     = useRef<HTMLDivElement>(null);
+  const projectRef        = useRef<HTMLDivElement>(null);
   const fadeOverlayRef    = useRef<HTMLDivElement>(null);
 
   const clips = heroVideos.slice(0, 3);
@@ -120,7 +121,7 @@ export function RecHero({
     // "+=NNvh" como string não estava resultando na distância esperada (o pin-spacer
     // ficava com só ~55px extras, não ~500px) — usar pixels calculados explicitamente
     // a partir de window.innerHeight elimina qualquer ambiguidade de parsing.
-    const pinDistance = () => window.innerHeight * (mobileNow ? 0.30 : 0.46);
+    const pinDistance = () => window.innerHeight * (mobileNow ? 0.22 : 0.34);
 
     // "Bump": sobe de 0→1 em [inStart,inEnd], segura em 1, desce de 1→0 em [outStart,outEnd].
     const bump = (p: number, inStart: number, inEnd: number, outStart: number, outEnd: number) => {
@@ -156,14 +157,19 @@ export function RecHero({
         // ainda está terminando de sair (crossfade, sem hiato), segura legível e sai
         // antes do fade sólido cobrir a cena.
         if (transitionRef.current) {
-          const tp = bump(p, 0.26, 0.42, 0.62, 0.8);
+          const tp = bump(p, 0.22, 0.36, 0.52, 0.68);
           gsap.set(transitionRef.current, { opacity: tp, y: (1 - tp) * 18 });
         }
 
-        // Estado 3 — últimos ~20% do pin: cobre com a cor sólida do fundo, emendando
-        // com a próxima seção (mesmo #080706) — sem corte seco.
+        // Estado 3 — a ponte entra antes da segunda frase terminar de sair.
+        if (projectRef.current) {
+          const pp = bump(p, 0.56, 0.68, 0.82, 0.94);
+          gsap.set(projectRef.current, { opacity: pp, y: (1 - pp) * 18 });
+        }
+
+        // Estado 4 — gradiente curto entrega a próxima seção.
         if (fadeOverlayRef.current) {
-          const fp = Math.max(0, (p - 0.8) / 0.2);
+          const fp = Math.max(0, (p - 0.86) / 0.14);
           gsap.set(fadeOverlayRef.current, { opacity: fp });
         }
       },
@@ -260,7 +266,25 @@ export function RecHero({
         </p>
       </div>
 
-      <div ref={fadeOverlayRef} style={{ position: "absolute", inset: 0, background: R.bg, opacity: 0, pointerEvents: "none", zIndex: 4 }} />
+      <div
+        ref={projectRef}
+        style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", pointerEvents: "none", zIndex: 3, opacity: 0 }}
+      >
+        <p style={{ ...R.display, fontWeight: 600, textAlign: "center", lineHeight: .98, fontSize: isMobile ? "clamp(1.7rem, 8vw, 2.35rem)" : "clamp(2rem, 4vw, 3.2rem)", textShadow: "0 6px 34px rgba(0,0,0,0.6)" }}>
+          Seu <span style={{ color: R.red }}>projeto</span> pode ser o próximo.
+        </p>
+        <a
+          href={whatsappHref}
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label="Falar com a REC pelo WhatsApp"
+          style={{ ...R.mono, position: "absolute", top: "calc(50% + 4.2rem)", fontSize: isMobile ? "10px" : "12px", letterSpacing: ".14em", textTransform: "uppercase", color: R.text, textDecoration: "underline", textDecorationColor: R.red, textUnderlineOffset: ".35rem", pointerEvents: "auto" }}
+        >
+          Falar com a REC ↗
+        </a>
+      </div>
+
+      <div ref={fadeOverlayRef} style={{ position: "absolute", inset: 0, background: `linear-gradient(180deg, transparent 20%, ${R.bg} 100%)`, opacity: 0, pointerEvents: "none", zIndex: 4 }} />
 
       <div ref={ctaWrapRef} style={{ position: "absolute", bottom: isMobile ? "1.6rem" : "2rem", left: isMobile ? "1.5rem" : "2rem", zIndex: 3, display: "flex", flexWrap: "wrap", gap: isMobile ? "1.1rem" : "1.6rem", alignItems: "baseline" }}>
         <EdgeCTA isMobile={isMobile} label="Ver trabalhos" onClick={onScrollToWork} />

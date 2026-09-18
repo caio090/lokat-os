@@ -125,42 +125,14 @@ export default function LokatRecPage() {
         whatsappHref={whatsappUrl("Olá! Vim pelo site da LOKAT REC e queria conversar sobre um projeto.")}
       />
 
-      {/*
-        HOTFIX (Hero/Clientes handoff): a correção anterior usava um overlap de
-        -90vh/-94vh — fechava o vão, mas como esse deslocamento é fixo (não depende
-        do scroll), o Clientes ficava dentro da altura do viewport (900/844px) desde
-        o primeiro frame, sobrepondo a headline/"Mas não é somente vídeo..." o tempo
-        todo, não só no fim. Reduzido pra um overlap pequeno (px fixos, não vh) —
-        pequeno o bastante pra nunca alcançar a área central onde ficam as headlines
-        (ambas ficam verticalmente centralizadas, bem longe da borda inferior), mas
-        suficiente pra fechar o vão residual que sobra depois que o Hero termina de
-        rolar naturalmente após o unpin, sem reintroduzir a "viewport quase vazia".
-      */}
-      <div style={{ position: "relative", height: isMobile ? "210px" : "220px" }}>
-        <div style={{ position: "absolute", top: isMobile ? "1rem" : "1.2rem", left: "1.5rem", right: "1.5rem", zIndex: 1, textAlign: "center" }}>
-          <p style={{ ...R.display, fontSize: isMobile ? "clamp(1.7rem, 8vw, 2.35rem)" : "clamp(2rem, 4vw, 3.2rem)", lineHeight: .98, color: R.text, margin: 0 }}>
-            Seu <span style={{ color: R.red }}>projeto</span> pode ser o próximo.
-          </p>
-          <a
-            href={whatsappUrl("Olá! Vim pelo site da LOKAT REC e queria conversar sobre um projeto.")}
-            target="_blank"
-            rel="noreferrer"
-            aria-label="Falar com a REC pelo WhatsApp"
-            style={{ ...R.mono, display: "inline-block", marginTop: ".8rem", fontSize: isMobile ? ".52rem" : ".58rem", letterSpacing: ".14em", textTransform: "uppercase", color: R.text, textDecoration: "underline", textDecorationColor: R.red, textUnderlineOffset: ".35rem" }}
-          >
-            Falar com a REC ↗
-          </a>
-        </div>
-        <motion.div
-          initial={{ opacity: 0, y: 28 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true, amount: 0.2 }}
-          transition={{ duration: .8, ease: [0.16, 1, 0.3, 1] }}
-          style={{ position: "absolute", bottom: 0, left: 0, right: 0, zIndex: 2 }}
-        >
-          <ClientCasesMarquee isMobile={isMobile} />
-        </motion.div>
-      </div>
+      <motion.div
+        initial={{ opacity: 0, y: 28 }}
+        whileInView={{ opacity: 1, y: 0 }}
+        viewport={{ once: true, amount: 0.2 }}
+        transition={{ duration: .8, ease: [0.16, 1, 0.3, 1] }}
+      >
+        <ClientCasesMarquee isMobile={isMobile} />
+      </motion.div>
 
       <div ref={workRef}>
         <CompactWorks
