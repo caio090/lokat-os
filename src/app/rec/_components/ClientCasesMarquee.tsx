@@ -34,30 +34,45 @@ export function ClientCasesMarquee({ isMobile }: { isMobile: boolean }) {
     const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
     if (mq.matches) return;
 
-    const halfWidth = track.scrollWidth / 2;
     const speedPxPerSec = isMobile ? 16 : 21;
-    const duration = Math.max(halfWidth / speedPxPerSec, 20);
+    let tween: gsap.core.Tween | null = null;
+    let measuredWidth = 0;
 
-    const tween = gsap.to(track, {
-      xPercent: -50,
-      duration,
-      ease: "none",
-      repeat: -1,
-    });
+    const startWhenMeasured = () => {
+      const width = track.scrollWidth;
+      if (width <= 0 || width === measuredWidth) return;
+      measuredWidth = width;
+      if (tween) tween.kill();
+      tween = gsap.to(track, {
+        xPercent: -50,
+        duration: Math.max(width / 2 / speedPxPerSec, 20),
+        ease: "none",
+        repeat: -1,
+      });
+    };
 
-    const onEnter = () => gsap.to(tween, { timeScale: 0.35, duration: .4, ease: "power2.out" });
-    const onLeave = () => gsap.to(tween, { timeScale: 1, duration: .6, ease: "power2.out" });
+    const resizeObserver = new ResizeObserver(startWhenMeasured);
+    resizeObserver.observe(track);
+    const images = [...track.querySelectorAll("img")];
+    images.forEach((image) => image.addEventListener("load", startWhenMeasured));
+    startWhenMeasured();
+
+    const onEnter = () => { if (tween) gsap.to(tween, { timeScale: 0.35, duration: .4, ease: "power2.out" }); };
+    const onLeave = () => { if (tween) gsap.to(tween, { timeScale: 1, duration: .6, ease: "power2.out" }); };
     const section = sectionRef.current;
     if (!isMobile && section) {
       section.addEventListener("mouseenter", onEnter);
       section.addEventListener("mouseleave", onLeave);
     }
 
-    const onVisibility = () => { if (document.hidden) tween.pause(); else tween.resume(); };
+    const onVisibility = () => { if (!tween) return; if (document.hidden) tween.pause(); else tween.resume(); };
     document.addEventListener("visibilitychange", onVisibility);
 
     return () => {
       document.removeEventListener("visibilitychange", onVisibility);
+      resizeObserver.disconnect();
+      images.forEach((image) => image.removeEventListener("load", startWhenMeasured));
+      tween?.kill();
       if (!isMobile && section) {
         section.removeEventListener("mouseenter", onEnter);
         section.removeEventListener("mouseleave", onLeave);

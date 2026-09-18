@@ -36,9 +36,9 @@ export function VideoModal({ video, onClose }: { video: RecVideo; onClose: () =>
       role="dialog"
       aria-modal="true"
       aria-label={video.title || "Vídeo"}
-      style={{ position: "fixed", inset: 0, zIndex: 200, background: "rgba(4,3,2,0.97)", display: "flex", alignItems: "center", justifyContent: "center", padding: "2rem" }}
+      style={{ position: "fixed", inset: 0, zIndex: 200, background: "rgba(4,3,2,0.97)", display: "flex", alignItems: "center", justifyContent: "center", padding: "16px", overflow: "auto" }}
     >
-      <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: "980px", position: "relative" }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: "min(980px, calc(100vw - 32px))", maxHeight: "calc(100svh - 32px)", position: "relative", display: "flex", flexDirection: "column" }}>
 
         {isMux ? (
           <MuxPlayer
@@ -47,7 +47,7 @@ export function VideoModal({ video, onClose }: { video: RecVideo; onClose: () =>
             autoPlay
             playsInline
             style={{
-              width: "100%", display: "block", maxHeight: "82vh",
+              width: "100%", aspectRatio: "16 / 9", display: "block", maxHeight: "78svh",
               "--media-object-fit": "contain",
             } as MuxCSSProperties}
           />
@@ -57,11 +57,11 @@ export function VideoModal({ video, onClose }: { video: RecVideo; onClose: () =>
             title={video.title}
             allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
             allowFullScreen
-            style={{ width: "100%", aspectRatio: "16/9", maxHeight: "82vh", border: "none", display: "block" }}
+            style={{ width: "100%", aspectRatio: "16/9", maxHeight: "78svh", border: "none", display: "block" }}
           />
         ) : video.video_url ? (
           <video ref={ref} src={video.video_url} muted={muted} loop playsInline preload="metadata" controls={false}
-            style={{ width: "100%", display: "block", background: "#000", maxHeight: "82vh", objectFit: "contain" }}
+            style={{ width: "100%", display: "block", background: "#000", maxHeight: "78svh", objectFit: "contain" }}
             onError={(e) => {
               e.currentTarget.style.display = "none";
               const fallback = e.currentTarget.nextElementSibling as HTMLElement | null;
@@ -87,7 +87,7 @@ export function VideoModal({ video, onClose }: { video: RecVideo; onClose: () =>
           </div>
         )}
 
-        <div style={{ position: "absolute", bottom: "100%", left: 0, right: 0, marginBottom: ".7rem" }}>
+        <div style={{ order: -1, position: "relative", left: 0, right: 0, marginBottom: ".55rem", flexShrink: 0 }}>
           <div style={{ display: "flex", gap: "1rem", alignItems: "baseline", justifyContent: "space-between" }}>
             <div style={{ display: "flex", gap: "1rem", alignItems: "baseline", flexWrap: "wrap" }}>
               <span style={{ ...R.mono, fontSize: ".5rem", letterSpacing: ".16em", color: R.red }}>● REC</span>
