@@ -3,6 +3,7 @@ import { forwardRef, useState } from "react";
 import { AtSign, Mail, Video } from "lucide-react";
 import { motion } from "framer-motion";
 import { R } from "../_lib/tokens";
+import { whatsappUrl } from "../_lib/whatsapp";
 
 function ContactForm() {
   const [nome,  setNome]  = useState("");
@@ -18,7 +19,7 @@ function ContactForm() {
       wpp   ? `WhatsApp: ${wpp}` : "",
       msg   ? `Sobre a gravação: ${msg}` : "",
     ].filter(Boolean).join("\n");
-    window.open(`https://wa.me/5589994217181?text=${encodeURIComponent(texto)}`, "_blank");
+    window.open(whatsappUrl(texto), "_blank");
   };
 
   const fieldStyle: React.CSSProperties = {
@@ -69,7 +70,7 @@ export const RecContact = forwardRef<HTMLDivElement, { isMobile: boolean }>(func
         <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: isMobile ? "3rem" : "6rem", alignItems: "start" }}>
           <div style={{ display: "flex", flexDirection: "column", gap: "1.4rem" }}>
             {[
-              { label: "WhatsApp",  sub: "(89) 9 9421-7181",     Icon: Video,  href: "https://wa.me/5589994217181?text=Ol%C3%A1%2C%20vim%20pela%20Lokat.rec%20e%20quero%20fazer%20um%20projeto%20audiovisual." },
+              { label: "WhatsApp",  sub: "(89) 9 9421-7181",     Icon: Video,  href: whatsappUrl("Olá, vim pela Lokat.rec e quero fazer um projeto audiovisual.") },
               { label: "E-mail",    sub: "lokat.rec@hotmail.com", Icon: Mail,  href: "mailto:lokat.rec@hotmail.com" },
               { label: "Instagram", sub: "@Lokat.rec",            Icon: AtSign, href: "https://instagram.com/lokat.rec" },
             ].map(({ label, sub, Icon, href }) => (

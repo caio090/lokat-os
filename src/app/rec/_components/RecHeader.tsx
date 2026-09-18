@@ -16,12 +16,12 @@ export function RecHeader({
   isMobile,
   onNavTrabalhos,
   onNavProdutora,
-  onNavContato,
+  whatsappHref,
 }: {
   isMobile: boolean;
   onNavTrabalhos: () => void;
   onNavProdutora: () => void;
-  onNavContato: () => void;
+  whatsappHref: string;
 }) {
   const scrolled = useSyncExternalStore(
     subscribeToScroll,
@@ -59,11 +59,10 @@ export function RecHeader({
       </button>
 
       {!isMobile && (
-        <nav style={{ display: "flex", gap: "2.2rem" }}>
+        <nav style={{ display: "flex", gap: "2.2rem", alignItems: "center" }}>
           {[
             ["Trabalhos", onNavTrabalhos],
             ["Produtora", onNavProdutora],
-            ["Contato", onNavContato],
           ].map(([label, fn]) => (
             <button
               key={label as string}
@@ -76,17 +75,30 @@ export function RecHeader({
               {label as string}
             </button>
           ))}
+          <a
+            href={whatsappHref}
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="Falar com a LOKAT.REC pelo WhatsApp"
+            style={{ ...R.mono, fontSize: ".62rem", letterSpacing: ".16em", textTransform: "uppercase", color: R.muted, textDecoration: "none", transition: "color .2s" }}
+            onMouseEnter={(e) => (e.currentTarget.style.color = R.text)}
+            onMouseLeave={(e) => (e.currentTarget.style.color = R.muted)}
+          >
+            Contato ↗
+          </a>
         </nav>
       )}
 
       {isMobile && (
-        <button
-          type="button"
-          onClick={onNavContato}
-          style={{ ...R.mono, fontSize: ".54rem", letterSpacing: ".14em", textTransform: "uppercase", color: R.text, background: "none", border: `1px solid ${R.border}`, cursor: "pointer", padding: ".35rem .7rem" }}
+        <a
+          href={whatsappHref}
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label="Falar com a LOKAT.REC pelo WhatsApp"
+          style={{ ...R.mono, fontSize: ".54rem", letterSpacing: ".14em", textTransform: "uppercase", color: R.text, textDecoration: "none", border: `1px solid ${R.border}`, padding: ".35rem .7rem", display: "inline-block" }}
         >
           Contato
-        </button>
+        </a>
       )}
     </header>
   );

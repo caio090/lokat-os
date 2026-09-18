@@ -34,11 +34,13 @@ export const STATIC_FEEDBACK: RecVideo = {
   sort_order: 999, status: "active", description: null, created_at: "",
 };
 
-// Teste 01 — primeiro trabalho servido via Mux (Playback ID público, sem credenciais).
-// Cliente/categoria ainda não confirmados: ficam ausentes de propósito, não inventados.
+// Duh Lanches — vídeo do hambúrguer, servido via Mux. Título público confirmado
+// pelo usuário nesta rodada ("REC COMMERCIALS + HERO HANDOFF"), substituindo o
+// rótulo antigo "A Certeza!". Playback ID e mídia preservados — só o metadado
+// público (título) mudou.
 export const MUX_TEST_VIDEO: RecVideo = {
   id: "mux-test-1",
-  title: "A Certeza!",
+  title: "Duh Lanches — Lanche da Madrugada",
   client_name: null,
   category: null,
   provider: "mux",
@@ -50,11 +52,13 @@ export const MUX_TEST_VIDEO: RecVideo = {
   sort_order: 999, status: "active", description: null, created_at: "",
 };
 
-// Teste 02 — segundo Playback ID Mux recebido sem título/cliente/categoria confirmados.
-// Título abaixo é um rótulo provisório de teste, não um nome de trabalho real — não inventado.
+// Centro de Neurodesenvolvimento — thumbnail mostra a mulher falando com a
+// identidade da Medical ao fundo/roupa. Título público confirmado pelo usuário,
+// substituindo o rótulo antigo "Teste Mux 02". Nome de cliente separado ainda
+// não confirmado — fica ausente de propósito, não inventado.
 export const MUX_TEST_VIDEO_2: RecVideo = {
   id: "mux-test-2",
-  title: "Teste Mux 02",
+  title: "Centro de Neurodesenvolvimento",
   client_name: null,
   category: null,
   provider: "mux",
@@ -66,11 +70,15 @@ export const MUX_TEST_VIDEO_2: RecVideo = {
   sort_order: 1000, status: "active", description: null, created_at: "",
 };
 
-// Teste 03 — novo Playback ID Mux (rodada "Portfólio + Parallax"). Substitui o vídeo
-// "Gosta Suco" na listagem de Comerciais (esse continua servindo o Hero normalmente).
+// Playback ID da rodada "Portfólio + Parallax" — perdeu a posição visual pra
+// "Noite das Patroas" nesta rodada ("REC COMMERCIALS + HERO HANDOFF"), mas
+// permanece no catálogo (Playback ID não removido, só reposicionado mais
+// adiante em Comerciais). Nome de campanha/cliente ainda não confirmado —
+// título fica vazio de propósito (não inventar, não mostrar rótulo de teste
+// publicamente). Playback ID: I5XRAObcrjynzumvWfGutXe00eFgt02et4fG9Xp3AVIew.
 export const MUX_TEST_VIDEO_3: RecVideo = {
   id: "mux-test-3",
-  title: "Teste Mux 03",
+  title: "",
   client_name: null,
   category: null,
   workType: "commercial",
@@ -80,10 +88,55 @@ export const MUX_TEST_VIDEO_3: RecVideo = {
   storage_path: null,
   thumbnail_url: "https://image.mux.com/I5XRAObcrjynzumvWfGutXe00eFgt02et4fG9Xp3AVIew/thumbnail.jpg",
   is_public: true, is_featured: false, is_feedback: false, show_in_cards: true,
-  sort_order: 1001, status: "active", description: null, created_at: "",
+  sort_order: 1004, status: "active", description: null, created_at: "",
 };
 
-export const MUX_TEST_VIDEOS: RecVideo[] = [MUX_TEST_VIDEO, MUX_TEST_VIDEO_2, MUX_TEST_VIDEO_3];
+// Noite das Patroas — título confirmado pelo usuário, assume a posição visual
+// que antes pertencia ao "Teste Mux 03" em Comerciais.
+export const MUX_NOITE_DAS_PATROAS: RecVideo = {
+  id: "mux-noite-das-patroas",
+  title: "Noite das Patroas",
+  client_name: null,
+  category: null,
+  workType: "commercial",
+  provider: "mux",
+  playbackId: "wuN26wNRNNZIIkHWcBMxHVJqihavjFHnR02Ji2Iz9eOI",
+  video_url: "https://stream.mux.com/wuN26wNRNNZIIkHWcBMxHVJqihavjFHnR02Ji2Iz9eOI.m3u8",
+  storage_path: null,
+  thumbnail_url: "https://image.mux.com/wuN26wNRNNZIIkHWcBMxHVJqihavjFHnR02Ji2Iz9eOI/thumbnail.jpg",
+  is_public: true, is_featured: false, is_feedback: false, show_in_cards: true,
+  sort_order: 1002, status: "active", description: null, created_at: "",
+};
+
+// Dia dos Pais — VT de campanha confirmado pelo usuário. Usa o subtipo editorial
+// "campaign-vt" (dentro de workType "commercial") pra mostrar "(VT de campanha)"
+// em vez de "(comercial)" no card, sem precisar de uma seção própria.
+export const MUX_DIA_DOS_PAIS: RecVideo = {
+  id: "mux-dia-dos-pais",
+  title: "Dia dos Pais",
+  client_name: null,
+  category: null,
+  workType: "commercial",
+  workSubtype: "campaign-vt",
+  provider: "mux",
+  playbackId: "77sY5fDYL22Tp7upR02sR4eib600jRoyxwyLpdmhklBho",
+  video_url: "https://stream.mux.com/77sY5fDYL22Tp7upR02sR4eib600jRoyxwyLpdmhklBho.m3u8",
+  storage_path: null,
+  thumbnail_url: "https://image.mux.com/77sY5fDYL22Tp7upR02sR4eib600jRoyxwyLpdmhklBho/thumbnail.jpg",
+  is_public: true, is_featured: false, is_feedback: false, show_in_cards: true,
+  sort_order: 1003, status: "active", description: null, created_at: "",
+};
+
+// Ordem editorial em Comerciais: Lanche da Madrugada, Centro de Neurodesenvolvimento,
+// Noite das Patroas (posição que era do antigo Mux 03), Dia dos Pais, e só então
+// o antigo Mux 03 (sem título público, mais adiante na seção).
+export const MUX_TEST_VIDEOS: RecVideo[] = [
+  MUX_TEST_VIDEO,
+  MUX_TEST_VIDEO_2,
+  MUX_NOITE_DAS_PATROAS,
+  MUX_DIA_DOS_PAIS,
+  MUX_TEST_VIDEO_3,
+];
 
 // Thumbnail real do YouTube a partir do ID — maxresdefault nem sempre existe (vídeos
 // verticais/curtos às vezes não geram essa resolução); o componente de preview faz
@@ -147,8 +200,11 @@ export const YOUTUBE_CONTENT_VIDEO_1: RecVideo = {
 
 export const YOUTUBE_CONTENT_VIDEOS: RecVideo[] = [YOUTUBE_CONTENT_VIDEO_1];
 
-// Rótulo pequeno/secundário por categoria — usado entre parênteses junto ao título.
-export function workTypeLabel(workType: RecVideo["workType"]): string {
+// Rótulo pequeno/secundário por categoria — usado junto ao título. workSubtype
+// refina o rótulo dentro do mesmo workType (ex: "commercial" + "campaign-vt" vira
+// "VT de campanha" em vez de só "comercial"), sem precisar de uma seção própria.
+export function workTypeLabel(workType: RecVideo["workType"], workSubtype?: RecVideo["workSubtype"]): string {
+  if (workType === "commercial" && workSubtype === "campaign-vt") return "VT de campanha";
   switch (workType) {
     case "music-video": return "videoclipe";
     case "aftermovie":  return "aftermovie";
@@ -159,7 +215,23 @@ export function workTypeLabel(workType: RecVideo["workType"]): string {
 
 // Nome de arquivo real usado pra identificar o vídeo "da Já" no catálogo dinâmico do
 // Supabase Storage — confirmado com o usuário (não é o mesmo que "Dia dos Solteiros").
+// Usado só pra composição do Hero nesta rodada: o vídeo continua normalmente em
+// Comerciais (rodada "CORREÇÃO IMPORTANTE - HERO REC" reverteu o show_in_cards:false
+// de uma rodada anterior — só sai do Hero, não do catálogo/seção).
 export const GOSTA_SUCO_STORAGE_PATH = "duhlanche-GOSTA-SUCO.mp4";
+
+// Correções de título público por storage_path — o listing dinâmico do Supabase
+// Storage deriva o título do nome do arquivo (prettifyName), o que produzia rótulos
+// técnicos ("Duhlache DIA DO SOLTEIRO"). Aqui só o metadado público é corrigido;
+// vídeo, provider e poster continuam intactos.
+const STORAGE_TITLE_OVERRIDES: Record<string, string> = {
+  "duhlache-DIA -DO-SOLTEIRO.mp4": "Duh Lanches — Dia do Solteiro",
+};
+
+export function applyStorageTitleOverride(video: RecVideo): RecVideo {
+  const override = video.storage_path ? STORAGE_TITLE_OVERRIDES[video.storage_path] : undefined;
+  return override ? { ...video, title: override } : video;
+}
 
 // Ano legível a partir de created_at — nunca inventa dado que não existe.
 export function yearOf(video: RecVideo): string | null {

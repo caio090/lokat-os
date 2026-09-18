@@ -14,11 +14,13 @@ export function RecHero({
   isMobile,
   reducedMotion,
   onScrollToWork,
+  whatsappHref,
 }: {
   heroVideos: RecVideo[];
   isMobile: boolean;
   reducedMotion: boolean;
   onScrollToWork: () => void;
+  whatsappHref: string;
 }) {
   const sectionRef        = useRef<HTMLDivElement>(null);
   const trackRef          = useRef<HTMLDivElement>(null);
@@ -223,38 +225,62 @@ export function RecHero({
 
       <div ref={fadeOverlayRef} style={{ position: "absolute", inset: 0, background: R.bg, opacity: 0, pointerEvents: "none", zIndex: 4 }} />
 
-      <div ref={ctaWrapRef} style={{ position: "absolute", bottom: isMobile ? "1.6rem" : "2rem", left: isMobile ? "1.5rem" : "2rem", zIndex: 3 }}>
-        <TrabalhosCTA isMobile={isMobile} onClick={onScrollToWork} />
+      <div ref={ctaWrapRef} style={{ position: "absolute", bottom: isMobile ? "1.6rem" : "2rem", left: isMobile ? "1.5rem" : "2rem", zIndex: 3, display: "flex", flexWrap: "wrap", gap: isMobile ? "1.1rem" : "1.6rem", alignItems: "baseline" }}>
+        <EdgeCTA isMobile={isMobile} label="Ver trabalhos" onClick={onScrollToWork} />
+        <EdgeCTA isMobile={isMobile} label="Falar com a REC ↗" href={whatsappHref} />
       </div>
     </section>
   );
 }
 
-function TrabalhosCTA({ isMobile, onClick }: { isMobile: boolean; onClick: () => void }) {
+// CTA minimalista de borda — texto + underline que expande no hover/tap, sem
+// cápsula/background/borda. Usado tanto pro scroll interno ("Ver trabalhos",
+// button) quanto pro link externo de WhatsApp ("Falar com a REC ↗", <a> real
+// por semântica/acessibilidade — abre em nova aba, funciona com cmd/ctrl-click).
+function EdgeCTA({
+  isMobile, label, onClick, href,
+}: {
+  isMobile: boolean;
+  label: string;
+  onClick?: () => void;
+  href?: string;
+}) {
   const [active, setActive] = useState(false);
 
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      onMouseEnter={() => setActive(true)}
-      onMouseLeave={() => setActive(false)}
-      onTouchStart={() => setActive(true)}
-      onTouchEnd={() => setTimeout(() => setActive(false), 250)}
+  const style: React.CSSProperties = {
+    ...R.mono, fontSize: isMobile ? "11px" : "12px", letterSpacing: ".14em", textTransform: "uppercase",
+    color: R.text, background: "none", border: "none", padding: 0, cursor: "pointer",
+    display: "inline-block", position: "relative", paddingBottom: "4px", textDecoration: "none",
+  };
+  const underline = (
+    <span
       style={{
-        ...R.mono, fontSize: isMobile ? "11px" : "12px", letterSpacing: ".14em", textTransform: "uppercase",
-        color: R.text, background: "none", border: "none", padding: 0, cursor: "pointer",
-        display: "inline-block", position: "relative", paddingBottom: "4px",
+        position: "absolute", left: 0, bottom: 0, height: "1px", background: R.red,
+        width: active ? "100%" : "34%",
+        transition: "width .35s ease",
       }}
-    >
-      Ver trabalhos
-      <span
-        style={{
-          position: "absolute", left: 0, bottom: 0, height: "1px", background: R.red,
-          width: active ? "100%" : "34%",
-          transition: "width .35s ease",
-        }}
-      />
+    />
+  );
+  const handlers = {
+    onMouseEnter: () => setActive(true),
+    onMouseLeave: () => setActive(false),
+    onTouchStart: () => setActive(true),
+    onTouchEnd: () => setTimeout(() => setActive(false), 250),
+  };
+
+  if (href) {
+    return (
+      <a href={href} target="_blank" rel="noopener noreferrer" aria-label={label.replace("↗", "").trim()} style={style} {...handlers}>
+        {label}
+        {underline}
+      </a>
+    );
+  }
+
+  return (
+    <button type="button" onClick={onClick} style={style} {...handlers}>
+      {label}
+      {underline}
     </button>
   );
 }

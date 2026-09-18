@@ -8,7 +8,9 @@ import { R, useIsMobile, usePrefersReducedMotion } from "./_lib/tokens";
 import {
   STATIC_VIDEOS, STATIC_FEEDBACK, MUX_TEST_VIDEOS,
   YOUTUBE_MUSIC_VIDEOS, YOUTUBE_CONTENT_VIDEOS, GOSTA_SUCO_STORAGE_PATH,
+  applyStorageTitleOverride,
 } from "./_lib/data";
+import { whatsappUrl } from "./_lib/whatsapp";
 import { RecHeader } from "./_components/RecHeader";
 import { RecHero } from "./_components/RecHero";
 import { ClientCasesMarquee } from "./_components/ClientCasesMarquee";
@@ -50,11 +52,12 @@ export default function LokatRecPage() {
         ?? data.find((v) => v.is_feedback)
         ?? (STATIC_FEEDBACK.video_url ? STATIC_FEEDBACK : null);
 
-      // "Vídeo da Já" (Gosta Suco): sai da listagem de Comerciais, mas continua no
-      // catálogo completo — o Hero lê daqui e não filtra por show_in_cards.
+      // "Vídeo da Já" (Gosta Suco): continua normalmente em Comerciais — só sai do
+      // Hero (ver heroVideos abaixo). Aplica também as correções de título público
+      // derivadas de storage_path (ex: "Duhlache DIA DO SOLTEIRO" → nome de marca real).
       const nonFeedback = data
         .filter((v) => !v.is_feedback)
-        .map((v) => v.storage_path === GOSTA_SUCO_STORAGE_PATH ? { ...v, show_in_cards: false } : v);
+        .map(applyStorageTitleOverride);
 
       setFeedbackVideo(feedback);
       setVideos([
@@ -71,13 +74,18 @@ export default function LokatRecPage() {
   const scrollTo = (ref: React.RefObject<HTMLDivElement | null>) =>
     ref.current?.scrollIntoView({ behavior: "smooth" });
 
-  // Hero 03: 2 vídeos reais já em catálogo (Supabase) + o teste Mux "A Certeza!", nessa ordem.
-  // Lê do catálogo completo (não filtrado por show_in_cards) — por isso "Gosta Suco"
-  // continua aparecendo aqui mesmo depois de sair da listagem de Comerciais.
-  const muxCerteza = videos.find((v) => v.provider === "mux" && v.title === "A Certeza!");
+  // Hero — 3 clipes únicos do Infinite Film Strip: 1 vídeo real do catálogo (excluindo
+  // "Gosta Suco", que saiu do Hero nesta rodada mas continua normalmente em Comerciais),
+  // "Noite das Patroas" no meio, e "Duh Lanches — Lanche da Madrugada" no final — igual
+  // à composição anterior, só a posição do meio mudou. Busca por playbackId (não por
+  // título) pra não quebrar quando o título público muda.
+  const heroVideoA        = videos.find((v) => v.provider !== "mux" && v.storage_path !== GOSTA_SUCO_STORAGE_PATH);
+  const heroNoiteDasPatroas = videos.find((v) => v.playbackId === "wuN26wNRNNZIIkHWcBMxHVJqihavjFHnR02Ji2Iz9eOI");
+  const heroLancheMadrugada = videos.find((v) => v.playbackId === "7HVIKdAWNXYTnsl1PaMn01m009QOCOLuVclX5XaMlewGU");
   const heroVideos = [
-    ...videos.filter((v) => v.provider !== "mux").slice(0, 2),
-    ...(muxCerteza ? [muxCerteza] : []),
+    ...(heroVideoA ? [heroVideoA] : []),
+    ...(heroNoiteDasPatroas ? [heroNoiteDasPatroas] : []),
+    ...(heroLancheMadrugada ? [heroLancheMadrugada] : []),
   ];
 
   // Catálogo editorial — separado por workType, sem duplicar componente por categoria.
@@ -96,7 +104,7 @@ export default function LokatRecPage() {
         isMobile={isMobile}
         onNavTrabalhos={() => scrollTo(workRef)}
         onNavProdutora={() => scrollTo(aboutRef)}
-        onNavContato={() => scrollTo(contactRef)}
+        whatsappHref={whatsappUrl("Olá! Vim pelo site da LOKAT REC e queria conversar sobre um projeto.")}
       />
 
       <RecHero
@@ -104,16 +112,31 @@ export default function LokatRecPage() {
         isMobile={isMobile}
         reducedMotion={reducedMotion}
         onScrollToWork={() => scrollTo(workRef)}
+        whatsappHref={whatsappUrl("Olá! Vim pelo site da LOKAT REC e queria conversar sobre um projeto.")}
       />
 
-      <motion.div
-        initial={{ opacity: 0, y: 28 }}
-        whileInView={{ opacity: 1, y: 0 }}
-        viewport={{ once: true, amount: 0.2 }}
-        transition={{ duration: .8, ease: [0.16, 1, 0.3, 1] }}
-      >
-        <ClientCasesMarquee isMobile={isMobile} />
-      </motion.div>
+      {/*
+        O Hero é 100vh pinado — depois que o pin libera, o próprio elemento (900px/844px)
+        ainda precisa rolar normalmente pra sair da tela, e como o overlay sólido do fim
+        do pin fica travado em opacity:1 (gsap.set não reage mais a scroll depois que o
+        progress trava em 1), esse trecho inteiro aparecia como uma caixa preta sólida —
+        quase um viewport inteiro de "vazio" (medido: ~900px desktop / ~844px mobile).
+        Fix: um âncora de altura zero (não desloca nada abaixo no fluxo normal) com um
+        filho position:absolute deslocado pra cima, fazendo o Clientes sobrepor
+        visualmente o fim do Hero sem mover Comerciais/resto da página (margin-top
+        negativo direto colapsava o fluxo normal e empurrava a página inteira pra cima).
+      */}
+      <div style={{ position: "relative", height: 0 }}>
+        <motion.div
+          initial={{ opacity: 0, y: 28 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          viewport={{ once: true, amount: 0.2 }}
+          transition={{ duration: .8, ease: [0.16, 1, 0.3, 1] }}
+          style={{ position: "absolute", top: isMobile ? "-94vh" : "-90vh", left: 0, right: 0, zIndex: 5 }}
+        >
+          <ClientCasesMarquee isMobile={isMobile} />
+        </motion.div>
+      </div>
 
       <div ref={workRef}>
         <CompactWorks

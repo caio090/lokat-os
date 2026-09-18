@@ -86,7 +86,7 @@ function CompactCard({ video, onOpen }: { video: RecVideo; onOpen: () => void })
       tabIndex={0}
       onClick={onOpen}
       onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen(); } }}
-      aria-label={`Assistir ${video.title}${video.client_name ? ` — ${video.client_name}` : ""}`}
+      aria-label={`Assistir ${video.title || video.client_name || "trabalho"}${video.title && video.client_name ? ` — ${video.client_name}` : ""}`}
       style={{ cursor: "pointer" }}
     >
       <div ref={ref} style={{ position: "relative", aspectRatio: "16/9", overflow: "hidden", background: R.warm }}>
@@ -100,11 +100,13 @@ function CompactCard({ video, onOpen }: { video: RecVideo; onOpen: () => void })
         <div style={{ position: "absolute", inset: 0, background: "linear-gradient(180deg, rgba(6,5,4,0) 55%, rgba(6,5,4,0.72) 100%)", pointerEvents: "none" }} />
       </div>
       <p style={{ ...R.mono, fontSize: ".42rem", letterSpacing: ".14em", textTransform: "uppercase", color: R.muted, marginTop: ".55rem" }}>
-        {video.client_name ?? "LOKAT.REC"} · {workTypeLabel(video.workType)}{year ? ` · ${year}` : ""}
+        {video.client_name ?? "LOKAT.REC"} · {workTypeLabel(video.workType, video.workSubtype)}{year ? ` · ${year}` : ""}
       </p>
-      <p style={{ ...R.grotesk, fontSize: ".82rem", fontWeight: 600, color: R.text, marginTop: ".15rem", lineHeight: 1.25 }}>
-        {video.title}
-      </p>
+      {video.title && (
+        <p style={{ ...R.grotesk, fontSize: ".82rem", fontWeight: 600, color: R.text, marginTop: ".15rem", lineHeight: 1.25 }}>
+          {video.title}
+        </p>
+      )}
     </div>
   );
 }

@@ -35,7 +35,7 @@ export function VideoModal({ video, onClose }: { video: RecVideo; onClose: () =>
       onClick={onClose}
       role="dialog"
       aria-modal="true"
-      aria-label={video.title}
+      aria-label={video.title || "Vídeo"}
       style={{ position: "fixed", inset: 0, zIndex: 200, background: "rgba(4,3,2,0.97)", display: "flex", alignItems: "center", justifyContent: "center", padding: "2rem" }}
     >
       <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: "980px", position: "relative" }}>
@@ -92,7 +92,7 @@ export function VideoModal({ video, onClose }: { video: RecVideo; onClose: () =>
             <div style={{ display: "flex", gap: "1rem", alignItems: "baseline", flexWrap: "wrap" }}>
               <span style={{ ...R.mono, fontSize: ".5rem", letterSpacing: ".16em", color: R.red }}>● REC</span>
               {video.category && <span style={{ ...R.mono, fontSize: ".5rem", letterSpacing: ".16em", textTransform: "uppercase", color: R.muted }}>{video.category}</span>}
-              <span style={{ ...R.grotesk, fontSize: ".9rem", fontWeight: 700, color: R.text }}>{video.title}</span>
+              {video.title && <span style={{ ...R.grotesk, fontSize: ".9rem", fontWeight: 700, color: R.text }}>{video.title}</span>}
               {video.client_name && <span style={{ ...R.mono, fontSize: ".44rem", color: R.muted }}>{video.client_name}</span>}
             </div>
             <button type="button" onClick={onClose} style={{ ...R.mono, fontSize: ".5rem", letterSpacing: ".14em", textTransform: "uppercase", color: R.muted, background: "none", border: "none", cursor: "pointer", flexShrink: 0 }}>✕ fechar</button>
