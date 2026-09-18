@@ -25,7 +25,7 @@ export interface RecVideo {
   youtubeId?: string | null;
   // Categoria editorial do trabalho — controla em qual seção do portfólio ele aparece.
   // Ausente = tratado como "commercial" (mantém o comportamento anterior ao catálogo editorial).
-  workType?: "commercial" | "music-video" | "aftermovie" | "content";
+  workType?: "commercial" | "vt" | "music-video" | "aftermovie" | "content";
   // Subtipo editorial opcional — refina o rótulo dentro do mesmo workType sem criar
   // uma seção própria (ex: um VT de campanha continua em "commercial", só muda o
   // texto entre parênteses do card). Ausente = rótulo padrão do workType.

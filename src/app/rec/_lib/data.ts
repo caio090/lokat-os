@@ -34,13 +34,12 @@ export const STATIC_FEEDBACK: RecVideo = {
   sort_order: 999, status: "active", description: null, created_at: "",
 };
 
-// Duh Lanches — vídeo do hambúrguer, servido via Mux. Título público confirmado
-// pelo usuário nesta rodada ("REC COMMERCIALS + HERO HANDOFF"), substituindo o
-// rótulo antigo "A Certeza!". Playback ID e mídia preservados — só o metadado
-// público (título) mudou.
+// Mux 7HV: o histórico do catálogo comprova "A Certeza!" como título original.
+// O rótulo "Lanche da Madrugada" foi aplicado a este ID sem confirmação e não
+// deve continuar público até que o vídeo correto seja identificado.
 export const MUX_TEST_VIDEO: RecVideo = {
   id: "mux-test-1",
-  title: "Duh Lanches — Lanche da Madrugada",
+  title: "A Certeza!",
   client_name: null,
   category: null,
   provider: "mux",
@@ -108,15 +107,13 @@ export const MUX_NOITE_DAS_PATROAS: RecVideo = {
   sort_order: 1002, status: "active", description: null, created_at: "",
 };
 
-// Dia dos Pais — VT de campanha confirmado pelo usuário. Usa o subtipo editorial
-// "campaign-vt" (dentro de workType "commercial") pra mostrar "(VT de campanha)"
-// em vez de "(comercial)" no card, sem precisar de uma seção própria.
+// Dia dos Pais — VT horizontal de campanha, em seção editorial própria.
 export const MUX_DIA_DOS_PAIS: RecVideo = {
   id: "mux-dia-dos-pais",
   title: "Dia dos Pais",
   client_name: null,
   category: null,
-  workType: "commercial",
+  workType: "vt",
   workSubtype: "campaign-vt",
   provider: "mux",
   playbackId: "77sY5fDYL22Tp7upR02sR4eib600jRoyxwyLpdmhklBho",
@@ -127,9 +124,7 @@ export const MUX_DIA_DOS_PAIS: RecVideo = {
   sort_order: 1003, status: "active", description: null, created_at: "",
 };
 
-// Ordem editorial em Comerciais: Lanche da Madrugada, Centro de Neurodesenvolvimento,
-// Noite das Patroas (posição que era do antigo Mux 03), Dia dos Pais, e só então
-// o antigo Mux 03 (sem título público, mais adiante na seção).
+// Ordem editorial dos trabalhos Mux comerciais; o VT é renderizado em seção própria.
 export const MUX_TEST_VIDEOS: RecVideo[] = [
   MUX_TEST_VIDEO,
   MUX_TEST_VIDEO_2,
@@ -200,11 +195,9 @@ export const YOUTUBE_CONTENT_VIDEO_1: RecVideo = {
 
 export const YOUTUBE_CONTENT_VIDEOS: RecVideo[] = [YOUTUBE_CONTENT_VIDEO_1];
 
-// Rótulo pequeno/secundário por categoria — usado junto ao título. workSubtype
-// refina o rótulo dentro do mesmo workType (ex: "commercial" + "campaign-vt" vira
-// "VT de campanha" em vez de só "comercial"), sem precisar de uma seção própria.
+// Rótulo pequeno/secundário por categoria — usado junto ao título.
 export function workTypeLabel(workType: RecVideo["workType"], workSubtype?: RecVideo["workSubtype"]): string {
-  if (workType === "commercial" && workSubtype === "campaign-vt") return "VT de campanha";
+  if (workType === "vt" || workSubtype === "campaign-vt") return "VT de campanha";
   switch (workType) {
     case "music-video": return "videoclipe";
     case "aftermovie":  return "aftermovie";
@@ -220,6 +213,18 @@ export function workTypeLabel(workType: RecVideo["workType"], workSubtype?: RecV
 // de uma rodada anterior — só sai do Hero, não do catálogo/seção).
 export const GOSTA_SUCO_STORAGE_PATH = "duhlanche-GOSTA-SUCO.mp4";
 
+// Metadados editoriais confirmados para registros que chegam do Supabase.
+// Não altera banco/Storage; apenas normaliza a apresentação pública.
+export function applyEditorialOverride(video: RecVideo): RecVideo {
+  if (video.playbackId === MUX_TEST_VIDEO.playbackId) {
+    return { ...video, title: "A Certeza!", workType: "commercial", workSubtype: undefined };
+  }
+  if (video.playbackId === MUX_DIA_DOS_PAIS.playbackId) {
+    return { ...video, title: "Dia dos Pais", workType: "vt", workSubtype: "campaign-vt" };
+  }
+  return video;
+}
+
 // Correções de título/poster público por storage_path — o listing dinâmico do
 // Supabase Storage deriva o título do nome do arquivo (prettifyName), o que
 // produzia rótulos técnicos ("Duhlache DIA DO SOLTEIRO") e nunca tem poster
@@ -232,7 +237,7 @@ const STORAGE_OVERRIDES: Record<string, { title: string; thumbnail_url?: string 
 
 export function applyStorageTitleOverride(video: RecVideo): RecVideo {
   const override = video.storage_path ? STORAGE_OVERRIDES[video.storage_path] : undefined;
-  return override ? { ...video, ...override } : video;
+  return applyEditorialOverride(override ? { ...video, ...override } : video);
 }
 
 // Referência direta e imediata do 1º clipe real do Hero (Dia do Solteiro) — usa

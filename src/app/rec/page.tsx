@@ -53,11 +53,10 @@ export default function LokatRecPage() {
         ?? data.find((v) => v.is_feedback)
         ?? (STATIC_FEEDBACK.video_url ? STATIC_FEEDBACK : null);
 
-      // "Vídeo da Já" (Gosta Suco): continua normalmente em Comerciais — só sai do
-      // Hero (ver heroVideos abaixo). Aplica também as correções de título público
+      // Gosta Suco sai da renderização pública. Aplica também as correções de título público
       // derivadas de storage_path (ex: "Duhlache DIA DO SOLTEIRO" → nome de marca real).
       const nonFeedback = data
-        .filter((v) => !v.is_feedback)
+        .filter((v) => !v.is_feedback && v.storage_path !== GOSTA_SUCO_STORAGE_PATH)
         .map(applyStorageTitleOverride);
 
       setFeedbackVideo(feedback);
@@ -76,8 +75,8 @@ export default function LokatRecPage() {
     ref.current?.scrollIntoView({ behavior: "smooth" });
 
   // Hero — 3 clipes únicos do Infinite Film Strip: 1 vídeo real do catálogo (excluindo
-  // "Gosta Suco", que saiu do Hero nesta rodada mas continua normalmente em Comerciais),
-  // "Noite das Patroas" no meio, e "Duh Lanches — Lanche da Madrugada" no final — igual
+  // "Gosta Suco", removido da página pública), "Noite das Patroas" no meio e o terceiro
+  // clipe Mux preservado na composição atual — igual
   // à composição anterior, só a posição do meio mudou. Busca por playbackId (não por
   // título) pra não quebrar quando o título público muda.
   // Precisa ser um vídeo REAL reproduzível no Hero (nativo/Supabase) — não basta
@@ -91,17 +90,18 @@ export default function LokatRecPage() {
     (v) => v.provider !== "mux" && v.provider !== "youtube" && v.storage_path !== GOSTA_SUCO_STORAGE_PATH
   ) ?? HERO_DIA_DO_SOLTEIRO;
   const heroNoiteDasPatroas = videos.find((v) => v.playbackId === "wuN26wNRNNZIIkHWcBMxHVJqihavjFHnR02Ji2Iz9eOI");
-  const heroLancheMadrugada = videos.find((v) => v.playbackId === "7HVIKdAWNXYTnsl1PaMn01m009QOCOLuVclX5XaMlewGU");
+  const heroThirdVideo = videos.find((v) => v.playbackId === "7HVIKdAWNXYTnsl1PaMn01m009QOCOLuVclX5XaMlewGU");
   const heroVideos = [
     heroVideoA,
     ...(heroNoiteDasPatroas ? [heroNoiteDasPatroas] : []),
-    ...(heroLancheMadrugada ? [heroLancheMadrugada] : []),
+    ...(heroThirdVideo ? [heroThirdVideo] : []),
   ];
 
   // Catálogo editorial — separado por workType, sem duplicar componente por categoria.
   // "Aftermovie" não vem desse catálogo: é o FilmSection (conteúdo real já existente,
   // "O dia dela" / Maria Clara XV anos), reposicionado antes do Sandubão nesta rodada.
-  const commercialVideos  = videos.filter((v) => v.show_in_cards && (v.workType ?? "commercial") === "commercial");
+  const commercialVideos  = videos.filter((v) => v.show_in_cards && v.storage_path !== GOSTA_SUCO_STORAGE_PATH && (v.workType ?? "commercial") === "commercial");
+  const vtVideos          = videos.filter((v) => v.show_in_cards && v.workType === "vt");
   const musicVideos       = videos.filter((v) => v.workType === "music-video");
   const contentVideos     = videos.filter((v) => v.workType === "content");
 
@@ -157,6 +157,14 @@ export default function LokatRecPage() {
           heading="Comerciais"
         />
       </div>
+
+      <CompactWorks
+        videos={vtVideos}
+        isMobile={isMobile}
+        onOpen={setModalVideo}
+        kicker="[VT / Campanhas]"
+        heading="VT / Campanhas"
+      />
 
       <CompactWorks
         videos={musicVideos}
