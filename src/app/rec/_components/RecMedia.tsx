@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import MuxPlayer, { type MuxCSSProperties } from "@mux/mux-player-react";
 import type MuxPlayerElement from "@mux/mux-player";
 import { Play } from "lucide-react";
@@ -123,14 +123,27 @@ function PosterLayer({ src }: { src: string }) {
 }
 
 function YoutubeThumb({ youtubeId, onError }: { youtubeId: string; onError?: () => void }) {
+  const imageRef = useRef<HTMLImageElement>(null);
   const [src, setSrc] = useState(youtubeMaxThumb(youtubeId));
   const [triedFallback, setTriedFallback] = useState(false);
   const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    const image = imageRef.current;
+    if (!image?.complete) return;
+    if (!triedFallback && image.naturalWidth <= 120) {
+      setTriedFallback(true);
+      setSrc(youtubeFallbackThumb(youtubeId));
+      return;
+    }
+    if (image.naturalWidth > 0) setLoaded(true);
+  }, [src, triedFallback, youtubeId]);
 
   return (
     <div style={{ position: "absolute", inset: 0 }}>
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
+        ref={imageRef}
         src={src}
         alt=""
         onLoad={(e) => {
