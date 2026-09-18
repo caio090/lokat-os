@@ -29,7 +29,7 @@ export default function LokatRecPage() {
   const [modalVideo,    setModalVideo]    = useState<RecVideo | null>(null);
   // Parte estática (Mux/YouTube) não depende de nenhum fetch — populada direto no
   // useState inicial em vez de esperar o efeito assíncrono do Supabase resolver,
-  // pra não deixar o Hero (que usa 2 desses 3 clipes) sem nada em conexão lenta.
+  // pra não deixar o Hero sem nada em conexão lenta.
   const [videos,        setVideos]        = useState<RecVideo[]>([...STATIC_VIDEOS, ...MUX_TEST_VIDEOS, ...YOUTUBE_MUSIC_VIDEOS, ...YOUTUBE_CONTENT_VIDEOS]);
   const [feedbackVideo, setFeedbackVideo] = useState<RecVideo | null>(STATIC_FEEDBACK);
 
@@ -136,13 +136,27 @@ export default function LokatRecPage() {
         suficiente pra fechar o vão residual que sobra depois que o Hero termina de
         rolar naturalmente após o unpin, sem reintroduzir a "viewport quase vazia".
       */}
-      <div style={{ position: "relative", height: 0 }}>
+      <div style={{ position: "relative", height: isMobile ? "230px" : "240px" }}>
+        <div style={{ position: "absolute", top: isMobile ? "1.4rem" : "1.6rem", left: "1.5rem", right: "1.5rem", zIndex: 1, textAlign: "center" }}>
+          <p style={{ ...R.display, fontSize: isMobile ? "1.25rem" : "1.45rem", lineHeight: 1.05, color: R.text, margin: 0 }}>
+            Seu projeto pode ser o próximo.
+          </p>
+          <a
+            href={whatsappUrl("Olá! Vim pelo site da LOKAT REC e queria conversar sobre um projeto.")}
+            target="_blank"
+            rel="noreferrer"
+            aria-label="Falar com a REC pelo WhatsApp"
+            style={{ ...R.mono, display: "inline-block", marginTop: ".8rem", fontSize: isMobile ? ".52rem" : ".58rem", letterSpacing: ".14em", textTransform: "uppercase", color: R.text, textDecoration: "underline", textDecorationColor: R.red, textUnderlineOffset: ".35rem" }}
+          >
+            Falar com a REC ↗
+          </a>
+        </div>
         <motion.div
           initial={{ opacity: 0, y: 28 }}
           whileInView={{ opacity: 1, y: 0 }}
           viewport={{ once: true, amount: 0.2 }}
           transition={{ duration: .8, ease: [0.16, 1, 0.3, 1] }}
-          style={{ position: "absolute", top: isMobile ? "-56px" : "-84px", left: 0, right: 0, zIndex: 5 }}
+          style={{ position: "absolute", bottom: 0, left: 0, right: 0, zIndex: 2 }}
         >
           <ClientCasesMarquee isMobile={isMobile} />
         </motion.div>
