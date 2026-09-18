@@ -42,23 +42,50 @@ export function RecHero({
     const track = trackRef.current;
     if (!track) return;
 
+    // Lida direto com window.innerWidth em vez da prop `isMobile` — useIsMobile()
+    // usa useSyncExternalStore com getServerSnapshot()=false (evita mismatch de
+    // hidratação), corrigindo pra true logo depois em mobile real. Como esse
+    // valor está nas dependencies do useGSAP, essa correção disparava um SEGUNDO
+    // useGSAP setup (era o bug real por trás do "pin dobrado" só no mobile): o
+    // primeiro criava o pin com pinDistance de desktop, o segundo criava outro
+    // com pinDistance de mobile, e o cleanup do primeiro não desfazia a inflação
+    // do spacer antes do segundo medir. Lendo o viewport real aqui (o efeito já
+    // roda pós-hidratação) resolve certo já na primeira e única execução.
+    const mobileNow = window.innerWidth < 768 || navigator.maxTouchPoints > 0;
+
     // Duração calculada pela largura real do bloco — mesma velocidade percebida em qualquer viewport.
-    const halfWidth = track.scrollWidth / 2;
-    const speedPxPerSec = isMobile ? 24 : 32;
-    const duration = Math.max(halfWidth / speedPxPerSec, 8);
+    const speedPxPerSec = mobileNow ? 24 : 32;
+    const durationFor = (width: number) => Math.max(width / 2 / speedPxPerSec, 8);
 
     const marquee = gsap.to(track, {
       xPercent: -50,
-      duration,
+      duration: durationFor(track.scrollWidth),
       ease: "none",
       repeat: -1,
     });
+
+    // A esteira NUNCA deve depender de vídeo pronto (canplay/readyState/Mux
+    // inicializado) — só da largura real do próprio container. Mas essa largura
+    // podia ficar presa num valor errado se o primeiro layout não refletisse a
+    // dimensão final (ex: no mobile, useIsMobile() começa como false no SSR/
+    // hidratação e só corrige pra true logo em seguida — nesse meio-tempo o track
+    // teria sido medido com o flex-basis de desktop). ResizeObserver corrige a
+    // duração sempre que a largura real mudar, sem depender de nenhum evento de mídia.
+    let lastWidth = track.scrollWidth;
+    const ro = new ResizeObserver(() => {
+      const w = track.scrollWidth;
+      if (w > 0 && w !== lastWidth) {
+        lastWidth = w;
+        marquee.duration(durationFor(w));
+      }
+    });
+    ro.observe(track);
 
     const headline = headlineDriftRef.current;
     const headlineTween = headline
       ? gsap.to(headline, {
           xPercent: 7,
-          duration: duration * 2.2,
+          duration: durationFor(track.scrollWidth) * 2.2,
           ease: "sine.inOut",
           repeat: -1,
           yoyo: true,
@@ -88,12 +115,12 @@ export function RecHero({
     // Com o texto de transição, a linha do tempo agora tem 3 estados sucessivos
     // (headline principal → "mas não é somente vídeo..." → fade sólido), cada um
     // ocupando uma fatia do mesmo progress 0-1, sem espaço vazio entre eles.
-    const scaleMax  = isMobile ? 0.11 : 0.17;
-    const driftMax  = isMobile ? 55   : 130;
+    const scaleMax  = mobileNow ? 0.11 : 0.17;
+    const driftMax  = mobileNow ? 55   : 130;
     // "+=NNvh" como string não estava resultando na distância esperada (o pin-spacer
     // ficava com só ~55px extras, não ~500px) — usar pixels calculados explicitamente
     // a partir de window.innerHeight elimina qualquer ambiguidade de parsing.
-    const pinDistance = () => window.innerHeight * (isMobile ? 0.46 : 0.62);
+    const pinDistance = () => window.innerHeight * (mobileNow ? 0.46 : 0.62);
 
     // "Bump": sobe de 0→1 em [inStart,inEnd], segura em 1, desce de 1→0 em [outStart,outEnd].
     const bump = (p: number, inStart: number, inEnd: number, outStart: number, outEnd: number) => {
@@ -144,9 +171,19 @@ export function RecHero({
 
     return () => {
       document.removeEventListener("visibilitychange", onVisibility);
+      ro.disconnect();
       st.kill();
     };
-  }, { scope: sectionRef, dependencies: [isMobile, reducedMotion, clips.map((c) => c.id).join(",")] });
+    // Identidade estável por mídia real (storage_path/playbackId), não o `id` do
+    // objeto React — o mesmo vídeo real pode chegar primeiro via uma referência
+    // imediata (fallback local, sem esperar o fetch do Supabase) e depois ser
+    // "redescoberto" pelo catálogo ao vivo com um `id` diferente (era o real bug:
+    // o pin-spacer dobrava de tamanho porque esse re-render recriava o
+    // ScrollTrigger com pin:true enquanto o spacer anterior ainda existia).
+    // `isMobile` de propósito fora dessa lista — o efeito já lê o viewport real
+    // direto (mobileNow) toda vez que roda, então incluir a prop só reintroduziria
+    // o re-init espúrio da correção de hidratação (false→true) que causava o bug acima.
+  }, { scope: sectionRef, dependencies: [reducedMotion, clips.map((c) => c.storage_path ?? c.playbackId ?? c.youtubeId ?? c.id).join(",")] });
 
   return (
     <section
@@ -160,7 +197,7 @@ export function RecHero({
             style={{ display: "flex", gap: isMobile ? "3vw" : "2vw", willChange: "transform" }}
           >
             {loopClips.map((video, i) => (
-              <FilmClip key={`${video.id}-${i}`} video={video} isMobile={isMobile} eager={i < clips.length + 1} />
+              <FilmClip key={`${video.id}-${i}`} video={video} isMobile={isMobile} eager={i < (isMobile ? 2 : clips.length + 1)} />
             ))}
           </div>
         </div>
@@ -292,7 +329,10 @@ function FilmClip({ video, isMobile, eager }: { video: RecVideo; isMobile: boole
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
-    const obs = new IntersectionObserver(([e]) => setInView(e.isIntersecting), { threshold: 0.05, rootMargin: "200px" });
+    // Margem maior só aqui (Hero) — os clipes já entram visíveis na primeira dobra,
+    // então vale começar a carregar/tocar um pouco mais cedo do que os 200px padrão
+    // usados no resto do site, sem alterar esse valor globalmente.
+    const obs = new IntersectionObserver(([e]) => setInView(e.isIntersecting), { threshold: 0.05, rootMargin: "400px" });
     obs.observe(el);
     return () => obs.disconnect();
   }, []);

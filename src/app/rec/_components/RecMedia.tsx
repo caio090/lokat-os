@@ -56,25 +56,36 @@ export function PreviewMedia({
 
   const handleReady = () => setReady(true);
 
+  // Poster real sempre por baixo, sem gate de opacity — evita a "primeira dobra
+  // preta" enquanto o vídeo carrega. Mux já tem thumbnail próprio (thumbnail_url);
+  // o vídeo do Hero (Dia do Solteiro) ganhou um frame real extraído via ffmpeg
+  // (ver applyStorageTitleOverride). Sem poster confirmado, cai no bg sólido —
+  // nunca um poster inventado/genérico.
+  const poster = video.thumbnail_url;
+
   if (video.provider === "mux" && video.playbackId) {
     const muxStyle: MuxCSSProperties = {
-      position: "absolute", inset: 0, width: "100%", height: "100%",
+      position: "absolute", inset: 0, width: "100%", height: "100%", zIndex: 1,
       "--controls": "none", "--media-object-fit": "cover",
-      opacity: ready ? 1 : 0, transition: "opacity .35s ease",
+      opacity: ready ? 1 : 0, transition: "opacity .3s ease",
     };
     return (
-      <MuxPlayer
-        ref={setEl}
-        playbackId={video.playbackId}
-        streamType="on-demand"
-        muted
-        loop
-        playsInline
-        preload="metadata"
-        style={muxStyle}
-        onCanPlay={handleReady}
-        onError={onError}
-      />
+      <>
+        {poster && <PosterLayer src={poster} />}
+        <MuxPlayer
+          ref={setEl}
+          playbackId={video.playbackId}
+          streamType="on-demand"
+          muted
+          loop
+          playsInline
+          preload="metadata"
+          poster={poster ?? undefined}
+          style={muxStyle}
+          onCanPlay={handleReady}
+          onError={onError}
+        />
+      </>
     );
   }
 
@@ -85,14 +96,29 @@ export function PreviewMedia({
   }
 
   return (
-    <video
-      ref={setEl}
-      src={video.video_url}
-      muted loop playsInline preload="metadata"
-      style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", opacity: ready ? 1 : 0, transition: "opacity .35s ease" }}
-      onCanPlay={handleReady}
-      onError={onError}
-    />
+    <>
+      {poster && <PosterLayer src={poster} />}
+      <video
+        ref={setEl}
+        src={video.video_url}
+        poster={poster ?? undefined}
+        muted loop playsInline preload="metadata"
+        style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", zIndex: 1, opacity: ready ? 1 : 0, transition: "opacity .3s ease" }}
+        onCanPlay={handleReady}
+        onError={onError}
+      />
+    </>
+  );
+}
+
+// Camada de poster sempre visível por baixo do vídeo (zIndex 0) — o vídeo (zIndex 1)
+// entra por cima com um crossfade curto assim que estiver pronto. Decidido separado
+// do atributo `poster` nativo porque esse suporte varia entre navegador/mux-player;
+// como <img> simples é sempre confiável.
+function PosterLayer({ src }: { src: string }) {
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img src={src} alt="" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", zIndex: 0 }} />
   );
 }
 

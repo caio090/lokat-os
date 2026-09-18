@@ -8,7 +8,7 @@ import { R, useIsMobile, usePrefersReducedMotion } from "./_lib/tokens";
 import {
   STATIC_VIDEOS, STATIC_FEEDBACK, MUX_TEST_VIDEOS,
   YOUTUBE_MUSIC_VIDEOS, YOUTUBE_CONTENT_VIDEOS, GOSTA_SUCO_STORAGE_PATH,
-  applyStorageTitleOverride,
+  applyStorageTitleOverride, HERO_DIA_DO_SOLTEIRO,
 } from "./_lib/data";
 import { whatsappUrl } from "./_lib/whatsapp";
 import { RecHeader } from "./_components/RecHeader";
@@ -27,8 +27,11 @@ export default function LokatRecPage() {
   const reducedMotion = usePrefersReducedMotion();
 
   const [modalVideo,    setModalVideo]    = useState<RecVideo | null>(null);
-  const [videos,        setVideos]        = useState<RecVideo[]>([]);
-  const [feedbackVideo, setFeedbackVideo] = useState<RecVideo | null>(null);
+  // Parte estática (Mux/YouTube) não depende de nenhum fetch — populada direto no
+  // useState inicial em vez de esperar o efeito assíncrono do Supabase resolver,
+  // pra não deixar o Hero (que usa 2 desses 3 clipes) sem nada em conexão lenta.
+  const [videos,        setVideos]        = useState<RecVideo[]>([...STATIC_VIDEOS, ...MUX_TEST_VIDEOS, ...YOUTUBE_MUSIC_VIDEOS, ...YOUTUBE_CONTENT_VIDEOS]);
+  const [feedbackVideo, setFeedbackVideo] = useState<RecVideo | null>(STATIC_FEEDBACK);
 
   const workRef    = useRef<HTMLDivElement>(null);
   const aboutRef   = useRef<HTMLDivElement>(null);
@@ -37,8 +40,6 @@ export default function LokatRecPage() {
   // Buscar vídeos: 1º tabela rec_videos, 2º storage listing, 3º STATIC_VIDEOS hardcoded
   useEffect(() => {
     if (!isSupabaseConfigured) {
-      setVideos([...STATIC_VIDEOS, ...MUX_TEST_VIDEOS, ...YOUTUBE_MUSIC_VIDEOS, ...YOUTUBE_CONTENT_VIDEOS]);
-      setFeedbackVideo(STATIC_FEEDBACK);
       return;
     }
 
@@ -79,11 +80,20 @@ export default function LokatRecPage() {
   // "Noite das Patroas" no meio, e "Duh Lanches — Lanche da Madrugada" no final — igual
   // à composição anterior, só a posição do meio mudou. Busca por playbackId (não por
   // título) pra não quebrar quando o título público muda.
-  const heroVideoA        = videos.find((v) => v.provider !== "mux" && v.storage_path !== GOSTA_SUCO_STORAGE_PATH);
+  // Precisa ser um vídeo REAL reproduzível no Hero (nativo/Supabase) — não basta
+  // excluir "mux": o catálogo inicial estático também tem YouTube (thumbnail-only,
+  // sem player de fundo), que "provider !== mux" deixava passar. Isso fazia o
+  // primeiro render pegar um clipe do YouTube por engano, e o clipe certo só
+  // chegava depois do fetch do Supabase resolver — essa troca de identidade
+  // disparava um re-init do ScrollTrigger (useGSAP em RecHero) que duplicava o
+  // pin-spacer (era o bug real por trás do "pin dobrado").
+  const heroVideoA = videos.find(
+    (v) => v.provider !== "mux" && v.provider !== "youtube" && v.storage_path !== GOSTA_SUCO_STORAGE_PATH
+  ) ?? HERO_DIA_DO_SOLTEIRO;
   const heroNoiteDasPatroas = videos.find((v) => v.playbackId === "wuN26wNRNNZIIkHWcBMxHVJqihavjFHnR02Ji2Iz9eOI");
   const heroLancheMadrugada = videos.find((v) => v.playbackId === "7HVIKdAWNXYTnsl1PaMn01m009QOCOLuVclX5XaMlewGU");
   const heroVideos = [
-    ...(heroVideoA ? [heroVideoA] : []),
+    heroVideoA,
     ...(heroNoiteDasPatroas ? [heroNoiteDasPatroas] : []),
     ...(heroLancheMadrugada ? [heroLancheMadrugada] : []),
   ];
@@ -116,15 +126,15 @@ export default function LokatRecPage() {
       />
 
       {/*
-        O Hero é 100vh pinado — depois que o pin libera, o próprio elemento (900px/844px)
-        ainda precisa rolar normalmente pra sair da tela, e como o overlay sólido do fim
-        do pin fica travado em opacity:1 (gsap.set não reage mais a scroll depois que o
-        progress trava em 1), esse trecho inteiro aparecia como uma caixa preta sólida —
-        quase um viewport inteiro de "vazio" (medido: ~900px desktop / ~844px mobile).
-        Fix: um âncora de altura zero (não desloca nada abaixo no fluxo normal) com um
-        filho position:absolute deslocado pra cima, fazendo o Clientes sobrepor
-        visualmente o fim do Hero sem mover Comerciais/resto da página (margin-top
-        negativo direto colapsava o fluxo normal e empurrava a página inteira pra cima).
+        HOTFIX (Hero/Clientes handoff): a correção anterior usava um overlap de
+        -90vh/-94vh — fechava o vão, mas como esse deslocamento é fixo (não depende
+        do scroll), o Clientes ficava dentro da altura do viewport (900/844px) desde
+        o primeiro frame, sobrepondo a headline/"Mas não é somente vídeo..." o tempo
+        todo, não só no fim. Reduzido pra um overlap pequeno (px fixos, não vh) —
+        pequeno o bastante pra nunca alcançar a área central onde ficam as headlines
+        (ambas ficam verticalmente centralizadas, bem longe da borda inferior), mas
+        suficiente pra fechar o vão residual que sobra depois que o Hero termina de
+        rolar naturalmente após o unpin, sem reintroduzir a "viewport quase vazia".
       */}
       <div style={{ position: "relative", height: 0 }}>
         <motion.div
@@ -132,7 +142,7 @@ export default function LokatRecPage() {
           whileInView={{ opacity: 1, y: 0 }}
           viewport={{ once: true, amount: 0.2 }}
           transition={{ duration: .8, ease: [0.16, 1, 0.3, 1] }}
-          style={{ position: "absolute", top: isMobile ? "-94vh" : "-90vh", left: 0, right: 0, zIndex: 5 }}
+          style={{ position: "absolute", top: isMobile ? "-56px" : "-84px", left: 0, right: 0, zIndex: 5 }}
         >
           <ClientCasesMarquee isMobile={isMobile} />
         </motion.div>

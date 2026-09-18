@@ -220,18 +220,40 @@ export function workTypeLabel(workType: RecVideo["workType"], workSubtype?: RecV
 // de uma rodada anterior — só sai do Hero, não do catálogo/seção).
 export const GOSTA_SUCO_STORAGE_PATH = "duhlanche-GOSTA-SUCO.mp4";
 
-// Correções de título público por storage_path — o listing dinâmico do Supabase
-// Storage deriva o título do nome do arquivo (prettifyName), o que produzia rótulos
-// técnicos ("Duhlache DIA DO SOLTEIRO"). Aqui só o metadado público é corrigido;
-// vídeo, provider e poster continuam intactos.
-const STORAGE_TITLE_OVERRIDES: Record<string, string> = {
-  "duhlache-DIA -DO-SOLTEIRO.mp4": "Duh Lanches — Dia do Solteiro",
+// Correções de título/poster público por storage_path — o listing dinâmico do
+// Supabase Storage deriva o título do nome do arquivo (prettifyName), o que
+// produzia rótulos técnicos ("Duhlache DIA DO SOLTEIRO") e nunca tem poster
+// (thumbnail_url sempre null). O poster é um frame real extraído via ffmpeg do
+// próprio vídeo (não gerado/inventado) — usado no Hero pra evitar a "primeira
+// dobra preta" enquanto o vídeo carrega, especialmente em conexões mais lentas.
+const STORAGE_OVERRIDES: Record<string, { title: string; thumbnail_url?: string }> = {
+  "duhlache-DIA -DO-SOLTEIRO.mp4": { title: "Duh Lanches — Dia do Solteiro", thumbnail_url: "/rec/posters/dia-do-solteiro-poster.webp" },
 };
 
 export function applyStorageTitleOverride(video: RecVideo): RecVideo {
-  const override = video.storage_path ? STORAGE_TITLE_OVERRIDES[video.storage_path] : undefined;
-  return override ? { ...video, title: override } : video;
+  const override = video.storage_path ? STORAGE_OVERRIDES[video.storage_path] : undefined;
+  return override ? { ...video, ...override } : video;
 }
+
+// Referência direta e imediata do 1º clipe real do Hero (Dia do Solteiro) — usa
+// recUrl() (só precisa do env var, já disponível no bundle, zero fetch) em vez de
+// esperar o catálogo assíncrono do Supabase (getPublicRecVideos/getVideosFromStorage)
+// resolver. Antes disso, o Hero inteiro (inclusive os 2 clipes Mux, que também são
+// constantes estáticas sem dependência de rede nenhuma) ficava esperando essa
+// única promise global — em conexão lenta, a "primeira dobra" da página inteira
+// ficava sem nenhum vídeo por vários segundos. Mesmo arquivo/URL que o listing
+// dinâmico acabaria descobrindo; só evita a espera.
+export const HERO_DIA_DO_SOLTEIRO: RecVideo = {
+  id: "hero-dia-do-solteiro",
+  title: "Duh Lanches — Dia do Solteiro",
+  client_name: "LOKAT.REC",
+  category: "campanha",
+  video_url: recUrl("duhlache-DIA -DO-SOLTEIRO.mp4"),
+  storage_path: "duhlache-DIA -DO-SOLTEIRO.mp4",
+  thumbnail_url: "/rec/posters/dia-do-solteiro-poster.webp",
+  is_public: true, is_featured: false, is_feedback: false, show_in_cards: true,
+  sort_order: 0, status: "active", description: null, created_at: "",
+};
 
 // Ano legível a partir de created_at — nunca inventa dado que não existe.
 export function yearOf(video: RecVideo): string | null {
