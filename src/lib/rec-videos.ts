@@ -17,6 +17,15 @@ export interface RecVideo {
   sort_order: number;
   status: string;
   created_at: string;
+  // Provedor de mídia — ausente/"supabase" mantém o comportamento atual (video_url do Storage).
+  // "mux" usa playbackId; "youtube" usa youtubeId. Nenhum dos dois usa video_url pra tocar
+  // (fica só como referência/fallback), mas o campo continua obrigatório por compatibilidade.
+  provider?: "supabase" | "mux" | "youtube";
+  playbackId?: string | null;
+  youtubeId?: string | null;
+  // Categoria editorial do trabalho — controla em qual seção do portfólio ele aparece.
+  // Ausente = tratado como "commercial" (mantém o comportamento anterior ao catálogo editorial).
+  workType?: "commercial" | "music-video" | "aftermovie" | "content";
 }
 
 export type RecVideoInsert = Omit<RecVideo, "id" | "created_at"> & { created_by?: string };
@@ -50,9 +59,10 @@ export async function getVideosFromStorage(): Promise<RecVideo[]> {
     for (const file of data) {
       if (!file.name || file.name.endsWith("/") || !file.name.match(/\.(mp4|webm|mov)$/i)) continue;
       const storagePath = prefix ? `${prefix}/${file.name}` : file.name;
-      // Encode cada segmento para suportar espaços e caracteres especiais
-      const encodedPath = storagePath.split("/").map(encodeURIComponent).join("/");
-      const { data: { publicUrl } } = supabase.storage.from(BUCKET).getPublicUrl(encodedPath);
+      // getPublicUrl já faz o encoding do path internamente — encodar aqui
+      // duplicava o encoding (ex: espaço virava %2520) e o navegador bloqueava
+      // o request via ORB para arquivos com espaço/caracteres especiais no nome.
+      const { data: { publicUrl } } = supabase.storage.from(BUCKET).getPublicUrl(storagePath);
       const lower = file.name.toLowerCase();
       const isFeedback = lower.includes("feedback") || lower.includes("depoimento") || lower.includes("testemunho");
       results.push({
