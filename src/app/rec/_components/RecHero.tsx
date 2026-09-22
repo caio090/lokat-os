@@ -302,11 +302,18 @@ export function RecHero({
         </div>
       </div>
 
-      <div ref={kickerRef} style={{ position: "absolute", top: "5.5rem", left: isMobile ? "1.5rem" : "2rem", zIndex: 3 }}>
-        <p style={{ ...R.mono, fontSize: ".5rem", letterSpacing: ".2em", textTransform: "uppercase", color: R.muted }}>
-          LOKAT.REC · Produção audiovisual
-        </p>
-      </div>
+      {/* Removido só no mobile — redundante com a logo do header (agora mais
+          compacto) e ocupava espaço logo no topo do Hero sem agregar. Desktop
+          mantém: o ref continua existindo, o gsap.set no onUpdate já é
+          null-safe (if (kickerRef.current)), então não precisa mexer na
+          animação — sem o elemento no mobile, o guard só não faz nada. */}
+      {!isMobile && (
+        <div ref={kickerRef} style={{ position: "absolute", top: "5.5rem", left: "2rem", zIndex: 3 }}>
+          <p style={{ ...R.mono, fontSize: ".5rem", letterSpacing: ".2em", textTransform: "uppercase", color: R.muted }}>
+            LOKAT.REC · Produção audiovisual
+          </p>
+        </div>
+      )}
 
       <div
         ref={transitionRef}

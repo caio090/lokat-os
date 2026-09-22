@@ -34,7 +34,9 @@ export function RecHeader({
       style={{
         position: "fixed", top: 0, left: 0, right: 0, zIndex: 50,
         display: "flex", alignItems: "center", justifyContent: "space-between",
-        padding: isMobile ? ".9rem 1.25rem" : "1.1rem 2rem",
+        // Mobile mais compacto — header alto demais deixava pouca área pro Hero
+        // logo abaixo. Desktop inalterado.
+        padding: isMobile ? ".78rem 1.25rem" : "1.1rem 2rem",
         background: scrolled ? "rgba(8,7,6,0.72)" : "transparent",
         backdropFilter: scrolled ? "blur(10px)" : "none",
         WebkitBackdropFilter: scrolled ? "blur(10px)" : "none",
