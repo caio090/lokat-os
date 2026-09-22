@@ -39,6 +39,25 @@ body {
 
 * { box-sizing: border-box; }
 
+/* Loop contínuo do Infinite Film Strip do Hero /rec — animação CSS pura (não
+   GSAP/rAF) porque roda no compositor, imune a contenção do main thread (ex:
+   decode de vídeo real). O drift/scale ligado ao scroll do storytelling
+   continua via GSAP num wrapper separado; isso aqui é só o movimento
+   horizontal contínuo e independente de scroll.
+   IMPORTANTE: usa uma distância em PIXELS via custom property, não -50%
+   direto. Medido em WebKit real (não emulação Chromium): animar
+   translateX(-50%) num container flex grande (a faixa de vídeos, ~1700px)
+   faz o WebKit deste ambiente recalcular "50% da largura" a cada frame de
+   forma extremamente cara, rodando a ~1/30 da velocidade configurada —
+   confirmado isolando a variável (mesmo elemento, mesmo tamanho, sem vídeo
+   nenhum: só trocar % por px já resolvia). O valor real em px é calculado no
+   JS (RecHero.tsx) a partir de track.scrollWidth e escrito nesta custom
+   property; o fallback -50% aqui é só pro instante antes do JS rodar. */
+@keyframes rec-hero-marquee {
+  from { transform: translateX(0); }
+  to   { transform: translateX(var(--rec-hero-marquee-distance, -50%)); }
+}
+
 /* ── Mobile safe area utilities ──────────────────────────────── */
 .safe-area-pb { padding-bottom: env(safe-area-inset-bottom, 0px); }
 .safe-area-pt { padding-top: env(safe-area-inset-top, 0px); }

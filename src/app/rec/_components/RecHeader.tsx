@@ -75,13 +75,15 @@ export function RecHeader({
               {label as string}
             </button>
           ))}
+          {/* Desktop continua discreto (texto, sem borda/fundo) — só o hover
+              agora tinge de vermelho da marca em vez de branco neutro. */}
           <a
             href={whatsappHref}
             target="_blank"
             rel="noopener noreferrer"
             aria-label="Falar com a LOKAT.REC pelo WhatsApp"
             style={{ ...R.mono, fontSize: ".62rem", letterSpacing: ".16em", textTransform: "uppercase", color: R.muted, textDecoration: "none", transition: "color .2s" }}
-            onMouseEnter={(e) => (e.currentTarget.style.color = R.text)}
+            onMouseEnter={(e) => (e.currentTarget.style.color = R.red)}
             onMouseLeave={(e) => (e.currentTarget.style.color = R.muted)}
           >
             Contato ↗
@@ -90,12 +92,20 @@ export function RecHeader({
       )}
 
       {isMobile && (
+        // Mobile precisa de mais presença que o texto solto do desktop — borda +
+        // fundo translúcido vermelho sutil (mesma linguagem do CTA do Hero),
+        // sem virar botão verde de WhatsApp nem crescer a altura do header.
         <a
           href={whatsappHref}
           target="_blank"
           rel="noopener noreferrer"
           aria-label="Falar com a LOKAT.REC pelo WhatsApp"
-          style={{ ...R.mono, fontSize: ".54rem", letterSpacing: ".14em", textTransform: "uppercase", color: R.text, textDecoration: "none", border: `1px solid ${R.border}`, padding: ".35rem .7rem", display: "inline-block" }}
+          style={{
+            ...R.mono, fontSize: ".54rem", letterSpacing: ".14em", textTransform: "uppercase",
+            color: R.text, textDecoration: "none", display: "inline-block",
+            border: `1px solid ${R.red}80`, background: `${R.red}14`,
+            padding: ".38rem .75rem", borderRadius: "3px",
+          }}
         >
           Contato
         </a>

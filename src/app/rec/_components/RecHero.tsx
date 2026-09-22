@@ -23,6 +23,7 @@ export function RecHero({
   whatsappHref: string;
 }) {
   const sectionRef        = useRef<HTMLDivElement>(null);
+  const scaleWrapRef      = useRef<HTMLDivElement>(null);
   const trackRef          = useRef<HTMLDivElement>(null);
   const headlineDriftRef  = useRef<HTMLDivElement>(null);
   const headlineScrollRef = useRef<HTMLDivElement>(null);
@@ -39,7 +40,20 @@ export function RecHero({
   const loopClips = clips.length > 0 ? [...clips, ...clips] : [];
 
   useGSAP(() => {
-    if (reducedMotion || clips.length === 0) return;
+    // Lê direto do matchMedia em vez da prop `reducedMotion` — mesmo padrão do
+    // mobileNow abaixo: usePrefersReducedMotion() usa useSyncExternalStore com
+    // getServerSnapshot()=false (evita mismatch de hidratação), corrigindo pro
+    // valor real do SO logo depois. Testado direto (Playwright com
+    // reducedMotion:"reduce"): a prop chegava true só DEPOIS do efeito já ter
+    // rodado com false, e como a versão anterior desse código tinha
+    // `reducedMotion` nas dependencies, o efeito RE-rodava e corretamente não
+    // reaplicava a animação — mas isso significa que, por um instante real,
+    // a faixa chegava a animar com reduced-motion ativo, e testes automatizados
+    // que leem o estado logo após o load pegavam esse instante. Ler o valor
+    // real do SO aqui garante certo já na primeira e única execução, igual
+    // ao mobileNow — sem depender de um segundo render pra corrigir.
+    const reducedMotionNow = typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (reducedMotionNow || clips.length === 0) return;
     const track = trackRef.current;
     if (!track) return;
 
@@ -57,13 +71,27 @@ export function RecHero({
     // Duração calculada pela largura real do bloco — mesma velocidade percebida em qualquer viewport.
     const speedPxPerSec = mobileNow ? 24 : 32;
     const durationFor = (width: number) => Math.max(width / 2 / speedPxPerSec, 8);
+    const applyMarqueeDistance = (width: number) => {
+      // PIXELS, não -50%. Isolado e confirmado em WebKit real (não emulação
+      // Chromium — não reproduz isso): animar translateX(-50%) num container
+      // flex deste tamanho (~1700px, 6 clipes) faz esse WebKit recalcular
+      // "50% da largura" a cada frame de forma extremamente cara — rodava a
+      // ~1/30 da velocidade configurada, com ou sem vídeo real decodificando
+      // (testado com vídeo pausado/sem src: mesmo resultado; testado uma
+      // réplica idêntica só com <div> coloridas: mesmo resultado; testado a
+      // mesma réplica trocando só % por px: velocidade correta). Não é
+      // contenção de main thread nem decode de vídeo — é especificamente o
+      // cálculo de porcentagem grande a cada frame.
+      track.style.setProperty("--rec-hero-marquee-distance", `-${width / 2}px`);
+    };
 
-    const marquee = gsap.to(track, {
-      xPercent: -50,
-      duration: durationFor(track.scrollWidth),
-      ease: "none",
-      repeat: -1,
-    });
+    // Loop contínuo via animação CSS (@keyframes rec-hero-marquee, globals.css),
+    // não gsap.to(repeat:-1) — desacopla o movimento contínuo do storytelling
+    // ligado a scroll (ScrollTrigger/pin), que continua via GSAP normalmente
+    // num wrapper por fora (scaleWrapRef) em vez do próprio track, já que os
+    // dois não podem escrever no mesmo `transform` do mesmo elemento sem conflito.
+    applyMarqueeDistance(track.scrollWidth);
+    track.style.animation = `rec-hero-marquee ${durationFor(track.scrollWidth)}s linear infinite`;
 
     // A esteira NUNCA deve depender de vídeo pronto (canplay/readyState/Mux
     // inicializado) — só da largura real do próprio container. Mas essa largura
@@ -71,13 +99,15 @@ export function RecHero({
     // dimensão final (ex: no mobile, useIsMobile() começa como false no SSR/
     // hidratação e só corrige pra true logo em seguida — nesse meio-tempo o track
     // teria sido medido com o flex-basis de desktop). ResizeObserver corrige a
-    // duração sempre que a largura real mudar, sem depender de nenhum evento de mídia.
+    // duração e a distância sempre que a largura real mudar, sem depender de
+    // nenhum evento de mídia.
     let lastWidth = track.scrollWidth;
     const ro = new ResizeObserver(() => {
       const w = track.scrollWidth;
       if (w > 0 && w !== lastWidth) {
         lastWidth = w;
-        marquee.duration(durationFor(w));
+        track.style.animationDuration = `${durationFor(w)}s`;
+        applyMarqueeDistance(w);
       }
     });
     ro.observe(track);
@@ -94,8 +124,8 @@ export function RecHero({
       : undefined;
 
     const onVisibility = () => {
-      if (document.hidden) { marquee.pause(); headlineTween?.pause(); }
-      else { marquee.resume(); headlineTween?.resume(); }
+      if (document.hidden) { track.style.animationPlayState = "paused"; headlineTween?.pause(); }
+      else { track.style.animationPlayState = "running"; headlineTween?.resume(); }
     };
     document.addEventListener("visibilitychange", onVisibility);
 
@@ -141,9 +171,11 @@ export function RecHero({
       onUpdate: (self) => {
         const p = self.progress;
 
-        // Vídeos: escala + deslocamento horizontal extra somado ao marquee independente
-        // (GSAP combina xPercent do tween contínuo com x do onUpdate no mesmo elemento).
-        gsap.set(track, { scale: 1 + p * scaleMax, x: -p * driftMax });
+        // Vídeos: escala + deslocamento horizontal ligado ao scroll — aplicado no
+        // wrapper de fora (scaleWrapRef), não no track: o track agora tem sua própria
+        // animação CSS contínua no mesmo `transform`, e as duas não podem escrever
+        // na mesma propriedade do mesmo elemento sem conflito.
+        if (scaleWrapRef.current) gsap.set(scaleWrapRef.current, { scale: 1 + p * scaleMax, x: -p * driftMax });
 
         // Estado 1 — headline principal: sai nos primeiros ~30% do pin.
         const hp = Math.min(p / 0.3, 1);
@@ -179,6 +211,11 @@ export function RecHero({
       document.removeEventListener("visibilitychange", onVisibility);
       ro.disconnect();
       st.kill();
+      // `track.style.animation` é uma mutação direta de DOM, não uma tween GSAP —
+      // o revert automático do useGSAP (gsap.context) não desfaz isso sozinho.
+      // Limpar explicitamente evita que a animação continue rodando se o efeito
+      // re-executar com reducedMotion=true (early return, sem reatribuir nada).
+      track.style.animation = "";
     };
     // Identidade estável por mídia real (storage_path/playbackId), não o `id` do
     // objeto React — o mesmo vídeo real pode chegar primeiro via uma referência
@@ -189,6 +226,16 @@ export function RecHero({
     // `isMobile` de propósito fora dessa lista — o efeito já lê o viewport real
     // direto (mobileNow) toda vez que roda, então incluir a prop só reintroduziria
     // o re-init espúrio da correção de hidratação (false→true) que causava o bug acima.
+    // `reducedMotion` de volta nas dependencies (diferente do isMobile) — é uma
+    // preferência de acessibilidade, vale reagir se o usuário mudar em tempo
+    // real. Seguro reincluir agora: o bug de duplicação do pin não era sobre
+    // ter isso nas dependencies, e sim sobre a identidade do 1º vídeo do Hero
+    // mudando de fonte (static → catálogo ao vivo) e disparando um SEGUNDO
+    // setup — isso já foi corrigido separadamente (chave estável por
+    // storage_path/playbackId). Como o efeito sempre lê reducedMotionNow ao
+    // vivo, mesmo a 1ª execução (antes da correção de hidratação) já decide
+    // certo, e uma 2ª execução real (usuário alternando a preferência) só
+    // troca entre "anima" e "não anima" — nunca cria dois pins.
   }, { scope: sectionRef, dependencies: [reducedMotion, clips.map((c) => c.storage_path ?? c.playbackId ?? c.youtubeId ?? c.id).join(",")] });
 
   return (
@@ -197,13 +244,27 @@ export function RecHero({
       style={{ position: "relative", height: "100vh", overflow: "hidden", background: R.bg }}
     >
       {loopClips.length > 0 ? (
-        <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center" }}>
+        <div ref={scaleWrapRef} style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", willChange: "transform" }}>
           <div
             ref={trackRef}
             style={{ display: "flex", gap: isMobile ? "3vw" : "2vw", willChange: "transform" }}
           >
             {loopClips.map((video, i) => (
-              <FilmClip key={`${video.id}-${i}`} video={video} isMobile={isMobile} eager={i < (isMobile ? 2 : clips.length + 1)} />
+              <FilmClip
+                // Chave estável por mídia real (storage_path/playbackId/youtubeId), não
+                // `video.id` — era a causa raiz do vídeo mobile nunca ficar pronto sem
+                // interação: `videos` no page.tsx começa com STATIC_VIDEOS (id="s0" pro
+                // "Dia do Solteiro") e é substituído pelo catálogo ao vivo do Supabase
+                // assim que o fetch resolve (id real, diferente). Como o `key` mudava,
+                // o React desmontava e remontava o <video>, cancelando o carregamento em
+                // andamento (confirmado via rede real no WebKit: requests repetidos e
+                // "cancelled" pro mesmo arquivo) — só "funcionava" depois de scroll porque,
+                // em algum momento, um remount finalmente terminava de carregar sem ser
+                // interrompido de novo. Mesma classe de bug do pin-spacer duplicado
+                // corrigido antes no useGSAP; aqui é a chave de render, não a dependency array.
+                key={`${video.storage_path ?? video.playbackId ?? video.youtubeId ?? video.id}-${i}`}
+                video={video} isMobile={isMobile} eager={i < (isMobile ? 2 : clips.length + 1)}
+              />
             ))}
           </div>
         </div>
@@ -273,15 +334,9 @@ export function RecHero({
         <p style={{ ...R.display, fontWeight: 600, textAlign: "center", lineHeight: .98, fontSize: isMobile ? "clamp(1.7rem, 8vw, 2.35rem)" : "clamp(2rem, 4vw, 3.2rem)", textShadow: "0 6px 34px rgba(0,0,0,0.6)" }}>
           Seu <span style={{ color: R.red }}>projeto</span> pode ser o próximo.
         </p>
-        <a
-          href={whatsappHref}
-          target="_blank"
-          rel="noopener noreferrer"
-          aria-label="Falar com a REC pelo WhatsApp"
-          style={{ ...R.mono, position: "absolute", top: "calc(50% + 4.2rem)", fontSize: isMobile ? "10px" : "12px", letterSpacing: ".14em", textTransform: "uppercase", color: R.text, textDecoration: "underline", textDecorationColor: R.red, textUnderlineOffset: ".35rem", pointerEvents: "auto" }}
-        >
-          Falar com a REC ↗
-        </a>
+        <div style={{ position: "absolute", top: "calc(50% + 4.2rem)", pointerEvents: "auto" }}>
+          <WhatsAppCTA href={whatsappHref} isMobile={isMobile} />
+        </div>
       </div>
 
       <div ref={fadeOverlayRef} style={{ position: "absolute", inset: 0, background: `linear-gradient(180deg, transparent 20%, ${R.bg} 100%)`, opacity: 0, pointerEvents: "none", zIndex: 4 }} />
@@ -346,9 +401,62 @@ function EdgeCTA({
   );
 }
 
+// CTA de contato imediatamente reconhecível como clicável (diferente do EdgeCTA
+// minimalista acima) — usado só na 3ª frase do storytelling ("Seu projeto pode
+// ser o próximo."). Ícone pequeno inline (sem lib nova), borda + fundo
+// translúcido vermelho sutil, microanimação no hover/tap. Sem cápsula grande,
+// sem verde de WhatsApp, sem glow — só o suficiente pra não parecer texto solto.
+function WhatsAppCTA({ href, isMobile }: { href: string; isMobile: boolean }) {
+  const [active, setActive] = useState(false);
+
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      aria-label="Falar com a REC pelo WhatsApp"
+      onMouseEnter={() => setActive(true)}
+      onMouseLeave={() => setActive(false)}
+      onTouchStart={() => setActive(true)}
+      onTouchEnd={() => setTimeout(() => setActive(false), 250)}
+      style={{
+        ...R.mono, display: "inline-flex", alignItems: "center", gap: ".5rem",
+        fontSize: isMobile ? "10px" : "12px", letterSpacing: ".13em", textTransform: "uppercase",
+        color: R.text, textDecoration: "none",
+        padding: isMobile ? ".55rem .85rem" : ".6rem 1.05rem",
+        border: `1px solid ${R.red}${active ? "cc" : "80"}`,
+        background: `${R.red}${active ? "2e" : "14"}`,
+        borderRadius: "3px",
+        transition: "background .25s ease, border-color .25s ease",
+      }}
+    >
+      <WhatsAppGlyph style={{ width: "13px", height: "13px", flexShrink: 0, transform: active ? "translateX(2px)" : "translateX(0)", transition: "transform .25s ease" }} />
+      Falar com a REC ↗
+    </a>
+  );
+}
+
+function WhatsAppGlyph({ style }: { style?: React.CSSProperties }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" style={style} aria-hidden="true">
+      <path d="M12.04 2C6.58 2 2.13 6.45 2.13 11.91c0 1.75.46 3.45 1.32 4.95L2.05 22l5.25-1.38c1.45.79 3.08 1.21 4.74 1.21 5.46 0 9.91-4.45 9.91-9.91 0-2.65-1.03-5.14-2.9-7.01A9.82 9.82 0 0 0 12.04 2Zm0 1.67c2.2 0 4.26.86 5.82 2.42a8.18 8.18 0 0 1 2.41 5.83c0 4.54-3.7 8.23-8.24 8.23-1.48 0-2.93-.39-4.19-1.15l-.3-.18-3.12.83.83-3.04-.2-.32a8.18 8.18 0 0 1-1.26-4.38c.01-4.54 3.7-8.24 8.25-8.24Zm-3.51 3.2c-.16 0-.43.05-.66.3-.22.25-.87.85-.87 2.07 0 1.22.89 2.4 1.01 2.56.13.15 1.74 2.77 4.29 3.77 2.12.83 2.55.66 3.01.62.46-.04 1.48-.6 1.68-1.2.24-.58.24-1.07.17-1.18-.06-.11-.23-.17-.48-.3-.25-.13-1.5-.74-1.74-.83-.24-.09-.41-.13-.58.13-.18.25-.66.82-.81 1-.15.17-.29.19-.55.06-.26-.13-1.08-.4-2.06-1.27-.76-.68-1.27-1.51-1.42-1.77-.15-.25-.02-.39.11-.52.11-.11.26-.29.37-.44.14-.14.18-.25.27-.42.09-.18.04-.34-.02-.47-.07-.12-.58-1.39-.82-1.92-.22-.52-.43-.45-.6-.45l-.3-.03Z" />
+    </svg>
+  );
+}
+
 function FilmClip({ video, isMobile, eager }: { video: RecVideo; isMobile: boolean; eager: boolean }) {
   const ref = useRef<HTMLDivElement>(null);
   const [inView, setInView] = useState(eager);
+  // Uma vez perto da viewport, o <video>/<mux-player> real fica montado pra sempre
+  // (nunca desmonta ao sair de novo — só pausa via `shouldPlay`). Sem isso, os 6
+  // clipes do loop (A/B/C/A/B/C, o Hero duplica pra costurar o loop infinito)
+  // montavam mídia real simultaneamente desde o primeiro frame — no mobile Safari
+  // real (confirmado em WebKit puro, não emulação Chromium) isso estourava o limite
+  // de decoders simultâneos e um dos elementos nunca saía de readyState 1, preso
+  // pra sempre até um evento externo (como voltar à aba) forçar o browser a
+  // reavaliar. Só o clipe "eager" (perto da 1ª dobra) monta mídia de cara; os
+  // outros mostram só o poster real até realmente chegarem perto.
+  const [everInView, setEverInView] = useState(eager);
 
   useEffect(() => {
     const el = ref.current;
@@ -356,7 +464,10 @@ function FilmClip({ video, isMobile, eager }: { video: RecVideo; isMobile: boole
     // Margem maior só aqui (Hero) — os clipes já entram visíveis na primeira dobra,
     // então vale começar a carregar/tocar um pouco mais cedo do que os 200px padrão
     // usados no resto do site, sem alterar esse valor globalmente.
-    const obs = new IntersectionObserver(([e]) => setInView(e.isIntersecting), { threshold: 0.05, rootMargin: "400px" });
+    const obs = new IntersectionObserver(([e]) => {
+      setInView(e.isIntersecting);
+      if (e.isIntersecting) setEverInView(true);
+    }, { threshold: 0.05, rootMargin: "400px" });
     obs.observe(el);
     return () => obs.disconnect();
   }, []);
@@ -369,7 +480,7 @@ function FilmClip({ video, isMobile, eager }: { video: RecVideo; isMobile: boole
         aspectRatio: "9/16", overflow: "hidden", background: R.warm,
       }}
     >
-      <PreviewMedia video={video} shouldPlay={inView} />
+      <PreviewMedia video={video} shouldPlay={inView} mount={everInView} />
     </div>
   );
 }

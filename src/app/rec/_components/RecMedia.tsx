@@ -15,11 +15,21 @@ type MediaHandle = HTMLVideoElement | MuxPlayerElement;
 const READY_ENOUGH = 2;
 
 export function PreviewMedia({
-  video, shouldPlay, onError,
+  video, shouldPlay, onError, mount = true,
 }: {
   video: RecVideo;
   shouldPlay: boolean;
   onError?: () => void;
+  // Opcional, default true (preserva 100% o comportamento atual em Comerciais/
+  // Videoclipes/Aftermovie/Conteúdo — nenhum desses passa essa prop). Só o Hero
+  // mobile usa mount=false pros clipes ainda longe da viewport: sem isso, TODO
+  // FilmClip do loop (6 no total, vários com o mesmo vídeo de ~46MB duplicado
+  // pra costura do loop A/B/C/A/B/C) montava seu <video preload="metadata">/
+  // <mux-player> imediatamente, mesmo sem nunca ter estado perto da tela —
+  // confirmado via rede real (WebKit): vários elementos de vídeo competindo pelo
+  // limite de decoders simultâneos do mobile Safari, um deles nunca saía de
+  // readyState 1. Enquanto mount=false, só o poster (real, já existente) aparece.
+  mount?: boolean;
 }) {
   // Ref por estado (não useRef): o mux-player carrega o custom element de forma
   // lazy (~2-3s depois do mount). Com useRef, o efeito de play/pause podia rodar
@@ -45,11 +55,21 @@ export function PreviewMedia({
 
     const tryPlay = () => { Promise.resolve(el.play()).catch(() => undefined); };
 
-    if (el.readyState >= READY_ENOUGH) {
+    // <video> nativo: chamar play() em qualquer readyState é padrão/seguro — o
+    // browser enfileira o pedido e carrega o resto sozinho. Isso é justamente
+    // o que destrava o carregamento: com preload="metadata", o vídeo NUNCA
+    // avança sozinho além dos metadados (nunca dispara "loadeddata") até que
+    // algo peça play() — esperar por "loadeddata" pra então chamar play() era
+    // um deadlock (confirmado em WebKit real: readyState preso em 1 para
+    // sempre; chamar play() manualmente destravava na hora, sem AbortError
+    // nem bloqueio de autoplay). O gate por readyState é só pro mux-player,
+    // que tem um risco real de AbortError diferente (ver comentário acima).
+    const isNativeVideo = el instanceof HTMLVideoElement;
+    if (isNativeVideo || el.readyState >= READY_ENOUGH) {
       tryPlay();
       return;
     }
-    // Ainda não carregou o suficiente — espera o evento em vez de forçar play() cedo demais.
+    // Só mux-player cai aqui — espera o evento em vez de forçar play() cedo demais.
     el.addEventListener("loadeddata", tryPlay, { once: true });
     return () => el.removeEventListener("loadeddata", tryPlay);
   }, [el, shouldPlay]);
@@ -72,19 +92,21 @@ export function PreviewMedia({
     return (
       <>
         {poster && <PosterLayer src={poster} />}
-        <MuxPlayer
-          ref={setEl}
-          playbackId={video.playbackId}
-          streamType="on-demand"
-          muted
-          loop
-          playsInline
-          preload="metadata"
-          poster={poster ?? undefined}
-          style={muxStyle}
-          onCanPlay={handleReady}
-          onError={onError}
-        />
+        {mount && (
+          <MuxPlayer
+            ref={setEl}
+            playbackId={video.playbackId}
+            streamType="on-demand"
+            muted
+            loop
+            playsInline
+            preload="metadata"
+            poster={poster ?? undefined}
+            style={muxStyle}
+            onCanPlay={handleReady}
+            onError={onError}
+          />
+        )}
       </>
     );
   }
@@ -98,15 +120,17 @@ export function PreviewMedia({
   return (
     <>
       {poster && <PosterLayer src={poster} />}
-      <video
-        ref={setEl}
-        src={video.video_url}
-        poster={poster ?? undefined}
-        muted loop playsInline preload="metadata"
-        style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", zIndex: 1, opacity: ready ? 1 : 0, transition: "opacity .3s ease" }}
-        onCanPlay={handleReady}
-        onError={onError}
-      />
+      {mount && (
+        <video
+          ref={setEl}
+          src={video.video_url}
+          poster={poster ?? undefined}
+          muted loop playsInline preload="metadata"
+          style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", zIndex: 1, opacity: ready ? 1 : 0, transition: "opacity .3s ease" }}
+          onCanPlay={handleReady}
+          onError={onError}
+        />
+      )}
     </>
   );
 }
