@@ -27,6 +27,3 @@ export const MEU_PP_MAX_SECTIONS = 5;
 if (MEU_PP_SECTIONS.length > MEU_PP_MAX_SECTIONS) {
   throw new Error(`Meu PP: a navegação não pode passar de ${MEU_PP_MAX_SECTIONS} itens.`);
 }
-
-/** O que a Fase 1 traz para HOJE — mostrado como prévia textual, nunca como botão. */
-export const PHASE_1_PREVIEW = ["prioridades", "agenda pessoal", "captura", "reflexo do dia", "decisões"] as const;

@@ -48,7 +48,7 @@ Capital/Deals (investment banking pessoal) é uma **camada dentro** do Meu PP, n
 5. Na UI, a rota do Meu PP **oculta a barra de Company** (mostra "Pessoal · privado"). O link na sidebar nunca recebe `?client=`, e a página não lê `?client=`.
 6. IA (futura, Fase 8): organiza, resume, conecta, recupera e compara. Nunca diz "compre/venda/aloque", nunca decide.
 
-Esses contratos estão travados em `src/lib/meu-pp/__tests__/meu-pp-foundation.structural.test.ts`.
+Esses contratos (incluindo a API e a UI da Fase 1) estão travados em `src/lib/meu-pp/__tests__/meu-pp-foundation.structural.test.ts`.
 
 ## 4. Fonte da verdade
 
@@ -65,10 +65,10 @@ Esses contratos estão travados em `src/lib/meu-pp/__tests__/meu-pp-foundation.s
 **HOJE · CAPITAL · MAPA · BIBLIOTECA · REVISÃO**, no máximo 5 itens (`src/lib/meu-pp/navigation.ts`).
 - Deals vivem **dentro de Capital**.
 - Decisões aparecem em Hoje (pendentes) e no Mapa (histórico).
-- A captura ("O que está na sua cabeça?") fica sempre acessível, fora da navegação (Fase 1).
-- Na Fase 0 só **HOJE** está ativa. As demais aparecem como "em breve", sem rota nem tela vazia.
+- A captura ("O que está na sua cabeça?") fica sempre acessível, fora da navegação: no topo da HOJE e, no celular, num atalho flutuante que aparece quando a caixa sai da tela.
+- Na Fase 0 e na Fase 1 só **HOJE** está ativa. As demais aparecem como "em breve", sem rota nem tela vazia.
 
-## 6. Banco (estado na Fase 0)
+## 6. Banco
 
 ### 6.1 Personal Core — baseline legada [FATO]
 Aplicada em produção em **13/08/2026**. Ledger `supabase_migrations.schema_migrations`:
@@ -99,26 +99,86 @@ Aplicada em produção em **13/08/2026**. Ledger `supabase_migrations.schema_mig
 - **Limitação documentada:** `source_id`/`target_id` são polimórficos e **não têm FK**. Integridade e propriedade do objeto são validadas na aplicação, com a sessão do usuário (sob RLS das tabelas de origem). Links órfãos são tolerados.
 - Segurança: mesmo padrão da baseline. Test plan executado ao vivo: **PASS 20/20** (owner CRUD, outro usuário isolado, anon e service_role sem acesso, constraints), com rollback automático e nenhuma linha persistida.
 
-## 7. Código (Fase 0)
+### 6.3 Cérebro pessoal — SQL 98 (Fase 1) [FATO]
+- Arquivos: `docs/supabase/98-personal-brain-phase1.sql`, `-rollback.sql` e `-test-plan.sql`. Aplicado em 30/09/2026 (ledger `20260930142105 personal_brain_phase1`).
+- Test plan executado ao vivo: **PASS 33/33** (fluxos de captura, decisão e substituição, imutabilidade, outro usuário, anon, service_role), com rollback automático e nenhuma linha persistida.
+- Mesmo padrão de segurança da seção 3: RLS do dono, GRANT só para `authenticated`, REVOKE de PUBLIC/anon/service_role em tabelas **e funções**. Funções são SECURITY INVOKER.
+
+| Objeto | Papel |
+|---|---|
+| `personal_tasks.focus_date` | "prioridade do dia": tarefa existente destacada para um dia. Sem tabela nova, sem duplicar conteúdo. Máximo de 3 por dia, validado na API |
+| `personal_quick_captures` | registro da captura **confirmada** (`raw_text`, `source` text/voice, tipo sugerido e tipo confirmado). "Ideia/nota" fica `inbox` até virar tarefa ou ser descartada (`dismissed`, mantida; sem auto delete) |
+| `personal_reflections` | reflexo do dia: o que mudou, aprendizado, o que ficou aberto, próxima ação, mudança de visão, texto livre. Um `daily` por dia (índice único parcial) |
+| `personal_decisions` | Decision Ledger: decisão, porquê, contexto, alternativas, premissas, riscos aceitos, gatilho e data de revisão, `status` active/superseded, `supersedes_decision_id` |
+| `personal_confirm_capture(...)` | captura confirmada → objeto real + captura + link `derived_from`, numa transação |
+| `personal_supersede_decision(...)` | "eu pensava → agora penso": nova decisão + antiga `superseded` + link `supersedes`, numa transação |
+
+Regras de memória:
+- **Decisão é histórica.** O conteúdo só pode ser corrigido nas primeiras **24h** (erro de digitação). Depois disso, mudar de posição é uma **nova decisão** que substitui a anterior (trigger `forbid_personal_decision_rewrite`). A cadeia é linear: cada decisão é substituída no máximo uma vez, e uma decisão substituída não volta a ser ativa.
+- **Captura nunca grava sozinha.** Analisar, sugerir o tipo e montar o preview acontecem no cliente. Descartar antes de confirmar não grava nada.
+- Gratidão continua em `gratitude_entries` e virou um bloco opcional do fechamento do dia.
+- Projeto em foco não ganhou tabela: é um link `operator —in_focus→ client_project` em `personal_entity_links` (só o id). Título e status são lidos de `client_projects` com a sessão, sob o RLS de Company. Se o acesso sumir, a HOJE mostra "Projeto indisponível".
+- Novos tipos ativos em `entity-links.ts`: `capture`, `reflection`, `decision`, `operator` (este só como origem e só com `in_focus`). Novas relações: `resulted_in`, `in_focus`. `client_project` nunca é origem.
+
+## 7. Código
+
+### 7.1 Fase 0
 
 | Caminho | Papel |
 |---|---|
 | `src/app/admin/meu-pp/page.tsx` | shell (server component): cabeçalho, 5 seções, HOJE com estado vazio honesto |
 | `src/lib/meu-pp/today.ts` | contagens de HOJE: tarefas em aberto, agenda do dia (fuso America/Fortaleza), rotinas ativas. Só sessão do usuário, `user_id` explícito |
-| `src/lib/meu-pp/navigation.ts` | seções e prévia textual da Fase 1 |
+| `src/lib/meu-pp/navigation.ts` | seções (a prévia textual da Fase 0 saiu na Fase 1) |
 | `src/lib/meu-pp/entity-links.ts` | vocabulário e validação da relação genérica |
 | `src/components/app-sidebar.tsx` | item "Meu PP" com etiqueta **Pessoal**; fora de `COMPANY_SCOPED_ROUTES` |
 | `src/app/admin/_layout-client.tsx` | na rota do Meu PP, troca a barra de Company pelo selo "Pessoal · privado" |
 
 - Nenhum dado é semeado nem inventado.
-- O estado vazio mostra "Ainda não há nada aqui." e a prévia textual da Fase 1, sem botões mortos. O botão "Começar meu dia" fica para a Fase 1, quando houver ação real.
+
+### 7.2 Fase 1
+
+| Caminho | Papel |
+|---|---|
+| `src/lib/meu-pp/today.ts` | snapshot da HOJE: prioridades, sugestões, agenda, rotinas que valem hoje, decisões para revisar (≤ 3), projeto em foco, caixa de notas, reflexo e gratidão do dia. Consultas em paralelo, todas com `user_id` da sessão |
+| `src/lib/meu-pp/domain.ts` | regras puras: dia civil America/Fortaleza (`-03:00`, nunca UTC), rotinas aplicáveis, ordem das sugestões (regra legada "3 prioridades"), sugestão local do tipo de captura e preview |
+| `src/lib/meu-pp/server.ts` | `personalSession()` (401/503), validadores e mapeamento de erros do banco |
+| `src/app/api/admin/meu-pp/{tasks,events,routines,captures,decisions,day,focus,history}` | API pessoal. Toda mutação passa por `withMutationProtection` |
+| `src/app/admin/meu-pp/_shell.tsx` | cabeçalho e navegação (server) |
+| `src/app/admin/meu-pp/_components/*` | HOJE interativa (client): captura, prioridades, agenda, decisões, continuar, rotinas, notas, fechar o dia, histórico |
+
+### 7.3 Fluxos da Fase 1
+1. **Primeiro uso** (nenhum dado pessoal): "Um espaço para organizar o que você pensa, decide, aprende e constrói." → **Começar meu dia** → guia curto (escolha até 3 prioridades · veja sua agenda · capture algo).
+2. **Captura:** texto ou voz → "Continuar" → tipo sugerido (Tarefa, Reflexão, Decisão, Evento, Ideia/nota), sempre trocável → preview editável → **Confirmar**. "Nada é salvo antes de você confirmar."
+   - Tarefa: "amanhã/hoje" vira prazo; pode entrar direto nas prioridades de hoje (respeitando o limite de 3).
+   - Decisão: "… porque …" separa decisão e porquê.
+   - Evento: "às 15h" vira horário; sem hora = dia todo.
+   - Reflexão: entra no reflexo do dia.
+3. **Prioridades:** até 3 por dia; concluir, reabrir, reordenar, tirar do dia. Sugestões seguem a regra legada (atrasada → vence hoje → resto).
+4. **Decisões para revisar** (revisão vencida, até 3): *Mantenho* · *Rever em 30 dias* · *Mudei de ideia* (abre "Eu pensava", grava a nova e substitui a antiga).
+5. **Continuar:** um projeto em foco, escolhido entre os `client_projects` que a sessão enxerga.
+6. **Rotinas de hoje:** feito · adiar · desfazer. Sem streak, sem pontuação.
+7. **Fechar o dia:** perguntas opcionais (o que mudou, aprendizado, o que ficou aberto, atenção amanhã, texto livre), decisões do dia ligadas ao reflexo, "mudei de ideia sobre…" e gratidão opcional. Resultado: "Dia registrado."
+8. **Histórico simples:** reflexos recentes e decisões recentes ("Eu pensava (data) / Agora penso").
+
+### 7.4 Decisões de UX
+- Uma pergunta por tela: "O que importa hoje?". Mobile em uma coluna com a captura no topo; desktop em duas colunas (fazer à esquerda, pensar à direita) e o fechamento do dia no fim.
+- Folhas (`<dialog>` nativo) em vez de páginas novas: folha inferior no celular, centralizada no desktop, Esc fecha.
+- Alvos de toque ≥ 44px e inputs com 16px no celular (sem zoom no iOS). Sem animações obrigatórias (respeita `prefers-reduced-motion`).
+- Sem gamificação (streak, XP, badges) e sem humor ou score emocional. Linguagem sóbria.
+- Sem fontes novas, sem design system novo, sem dependências novas.
+
+### 7.5 Voz
+Reusa `useJarvisVoice` → `/api/jarvis/transcribe` (autenticado; áudio só em memória, devolve só o texto e registra só metadados). O texto transcrito passa pelo **mesmo** fluxo de confirmação. O escopo do Jarvis **não** foi ampliado: nada do Meu PP vai para o chat, as ações ou o contexto do Jarvis.
+
+### 7.6 Fora da Fase 1
+Capital, Deals, Teses, Cenários, Mapa Vivo, Documentos/PDF, Biblioteca/Knowledge, Framework Registry, Jarvis pessoal, Open Finance, cotação, financeiro pessoal, IA financeira, classificação por LLM e embeddings. A sugestão de tipo da captura é **local, por palavras-chave**, e sempre confirmada pelo dono.
 
 ## 8. Entidades (modelo conceitual V2 — sem SQL até a fase correspondente)
 
 | Onda | Entidades |
 |---|---|
 | Existentes | PersonalTask, PersonalRoutine (+Entry), GratitudeEntry (vira bloco do fechamento diário), PersonalEvent, PersonalEntityLink |
-| Fase 1 | QuickCapture (sugestão → **confirmação humana** → objeto real; nunca grava sozinha), Reflection, Decision (ledger, só acréscimo, `supersedes`), PersonalProject (pode apontar para `client_project` só por id) |
+| Fase 1 (entregue) | QuickCapture (sugestão → **confirmação humana** → objeto real; nunca grava sozinha), Reflection, Decision (ledger, só acréscimo, `supersedes`). PersonalProject foi **adiado**: o "continuar projeto" usa um link `in_focus` para `client_project` (só id) |
 | Fase 2 | CapitalAccount (ativos e passivos por tipo, extensível), ValuationSnapshot, CapitalCommitment |
 | Fase 3 | Deal (RADAR → … → ENCERRADO / DESCARTADO; qualidade ≠ status), InvestmentThesis (versões), Assumption (válida/mudou/invalidada), DealScenario (conservador/base/otimista, só com premissas), Risk |
 | Fase 4 | Milestone. O Mapa é uma **visão** montada a partir das datas (passado sólido, "estamos aqui", futuro como hipótese) |
@@ -148,7 +208,7 @@ Descartadas ou adiadas:
 | Fase | Escopo | Estado |
 |---|---|---|
 | 0 | Reconciliação: baseline legada na `main`, `personal_entity_links`, rota, privacidade, docs | **concluída** |
-| 1 | HOJE + CAPTURA + REFLEXO DO DIA (com gratidão) + DECISÕES + continuar projeto | próxima |
+| 1 | HOJE + CAPTURA + REFLEXO DO DIA (com gratidão) + DECISÕES + continuar projeto | **concluída** (uso real antes da Fase 2) |
 | 2 | Capital | — |
 | 3 | Deals + tese + premissas + cenários | — |
 | 4 | Mapa Vivo + mudança de opinião | — |
