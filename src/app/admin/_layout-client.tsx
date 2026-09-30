@@ -108,6 +108,8 @@ export function AdminLayoutShell({ children, previewContext, initialUserRole, in
   const isSelectingClient = pathname === "/admin/contentos/selecionar-cliente";
   const isRecOSHubPage    = pathname === "/admin/contentos";
   const isInicioPage      = pathname === "/admin/inicio";
+  // Meu PP V2 — espaço PESSOAL: nunca mostra Company/cliente ativo (docs/meu-pp/README.md).
+  const isMeuPpPage       = pathname === "/admin/meu-pp" || pathname.startsWith("/admin/meu-pp/");
 
   // Efeito "spotlight" — luz suave seguindo o mouse, só na tela Início
   const spotlightRef = useRef<HTMLDivElement>(null);
@@ -373,7 +375,13 @@ export function AdminLayoutShell({ children, previewContext, initialUserRole, in
         )}>
           <div className="flex items-center gap-3 min-w-0">
             <AdminSearchSheet dark={isInicioPage} />
-            <CompanyContextBar />
+            {isMeuPpPage ? (
+              <span className="inline-flex items-center rounded-full border border-stone-300 px-2.5 py-1 text-[11px] font-medium uppercase tracking-[0.16em] text-stone-500">
+                Pessoal · privado
+              </span>
+            ) : (
+              <CompanyContextBar />
+            )}
           </div>
 
           <div className="flex items-center gap-2 md:gap-3">

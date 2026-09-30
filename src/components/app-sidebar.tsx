@@ -17,6 +17,7 @@ import {
   LogOut, KanbanSquare, ClipboardList, CalendarDays, UserCheck,
   ScrollText, Palette, Video, MousePointerClick, Link2, SlidersHorizontal,
   Shield, Clapperboard, UsersRound, Briefcase, Building2, FolderKanban,
+  NotebookPen,
 } from "lucide-react";
 import { RecDropIcon } from "@/components/icons/RecDropIcon";
 
@@ -26,7 +27,8 @@ export const configs: Record<SidebarVariant, {
   logo: string;
   logoColor: string;
   title: string;
-  nav: { href: string; label: string; icon: React.ElementType }[];
+  /** `tag`: rótulo discreto exibido com a sidebar aberta (ex.: "Pessoal" — não é um módulo de Company). */
+  nav: { href: string; label: string; icon: React.ElementType; tag?: string }[];
 }> = {
   admin: {
     logo: "L",
@@ -34,6 +36,8 @@ export const configs: Record<SidebarVariant, {
     title: "LOKAT OS",
     nav: [
       { href: "/admin/inicio",            label: "Início",           icon: Home },
+      // Meu PP V2 — espaço PESSOAL (docs/meu-pp/README.md). Fora de COMPANY_SCOPED_ROUTES: nunca recebe ?client=.
+      { href: "/admin/meu-pp",            label: "Meu PP",           icon: NotebookPen, tag: "Pessoal" },
       { href: "/admin/dashboard",         label: "Dashboard",        icon: LayoutDashboard },
       { href: "/admin/empresa",           label: "Empresa",          icon: Building2 },
       { href: "/admin/escritorio",        label: "Meu Escritório",   icon: Briefcase },
@@ -258,7 +262,7 @@ export function AppSidebar({
         aria-label="Menu"
         className="flex-1 overflow-y-auto scrollbar-thin py-2 flex flex-col gap-0.5 w-full px-2"
       >
-        {config.nav.filter(({ href }) => !hideRoutes?.includes(href)).map(({ href, label: baseLabel, icon: Icon }) => {
+        {config.nav.filter(({ href }) => !hideRoutes?.includes(href)).map(({ href, label: baseLabel, icon: Icon, tag }) => {
           const active = pathname === href || pathname.startsWith(href + "/");
           const badge  = badges?.[href] ?? 0;
           const resolvedHref = COMPANY_SCOPED_ROUTES.has(href) ? withCompanyContext(href, activeCompanyId) : href;
@@ -293,6 +297,11 @@ export function AppSidebar({
                     className="text-sm font-medium whitespace-nowrap overflow-hidden flex-1"
                   >
                     {label}
+                    {tag ? (
+                      <span className="ml-2 rounded-full border border-slate-600 px-1.5 py-px text-[9px] font-semibold uppercase tracking-wider text-slate-400">
+                        {tag}
+                      </span>
+                    ) : null}
                   </motion.span>
                 )}
               </AnimatePresence>
