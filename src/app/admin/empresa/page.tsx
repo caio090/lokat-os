@@ -13,7 +13,13 @@ import { getProjectProjections } from "@/lib/project-projection/adapters";
 import { getWorkItemProjections } from "@/lib/work-item-projection/adapters";
 import { buildCompanyCentralView } from "@/lib/company-central/builder";
 import { SURFACE_LABELS } from "@/config/workspace-capabilities";
-import { getLatestCompanyDiagnostic, getCompanyFindings } from "@/lib/company-diagnostic/adapters";
+import { getLatestCompanyDiagnostic, getCompanyFindings, getCompanyRoadmap } from "@/lib/company-diagnostic/adapters";
+import { getCompanyDecisions } from "@/lib/company-decisions/adapters";
+import { getClientTimeline } from "@/lib/client-timeline/adapters";
+import { getClientOpportunities } from "@/lib/client-opportunities/adapters";
+import { getClientProjects } from "@/lib/client-projects-admin/adapters";
+import { getClientMeetings, getClientProposals } from "@/lib/client-commercial/adapters";
+import { EmpresaRelationshipPanel } from "./_empresa-relationship-panel";
 
 /**
  * Sprint MVP Dogfood Spine V0.1 (Bloco D) — Company Central mínima.
@@ -59,10 +65,21 @@ export default async function AdminEmpresaPage({
   }
 
   const adminDb = createSupabaseAdminClient();
-  const [projects, workItems, diagnosticResult] = await Promise.all([
+  const [
+    projects, workItems, diagnosticResult,
+    decisionsResult, roadmapResult, timelineResult, opportunitiesResult, clientProjectsResult,
+    meetingsResult, proposalsResult,
+  ] = await Promise.all([
     getProjectProjections(adminDb, context.companyId),
     getWorkItemProjections(adminDb, context.companyId),
     getLatestCompanyDiagnostic(adminDb, context.companyId),
+    getCompanyDecisions(adminDb, context.companyId),
+    getCompanyRoadmap(adminDb, context.companyId),
+    getClientTimeline(adminDb, context.companyId),
+    getClientOpportunities(adminDb, context.companyId),
+    getClientProjects(adminDb, context.companyId),
+    getClientMeetings(adminDb, context.companyId),
+    getClientProposals(adminDb, context.companyId),
   ]);
   // Fase 27/68 — só busca Findings quando já existe um diagnóstico real
   // (evita uma segunda query condenada a "unavailable" quando o schema 91
@@ -199,6 +216,21 @@ export default async function AdminEmpresaPage({
           Ver todos os projetos <ArrowRight className="w-3.5 h-3.5" />
         </Link>
       </section>
+
+      {/* Retomada do produto — Decisões, Próxima Janela, Relacionamento
+          Comercial (reunião/proposta pós-venda), Oportunidades, Projetos
+          do Cliente (escopo) e Timeline. Tudo client-scoped via
+          context.companyId, nenhuma segunda Company-seleção. */}
+      <EmpresaRelationshipPanel
+        companyId={context.companyId}
+        decisionsResult={decisionsResult}
+        roadmapResult={roadmapResult}
+        timelineResult={timelineResult}
+        opportunitiesResult={opportunitiesResult}
+        clientProjectsResult={clientProjectsResult}
+        meetingsResult={meetingsResult}
+        proposalsResult={proposalsResult}
+      />
 
       {/* Atalhos */}
       <section className="bg-white rounded-2xl border border-gray-100 p-4">

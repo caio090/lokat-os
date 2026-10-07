@@ -164,7 +164,16 @@ export async function getFindingRecommendations(
   }
 }
 
-/** Fase 19/25 — Roadmap real e Company-scoped, nunca lista demonstrativa. */
+/**
+ * Fase 19/25 — Roadmap real e Company-scoped, nunca lista demonstrativa.
+ * SQL 99 (DB MIGRATION PENDING em Production no momento em que este
+ * código foi escrito) adicionou planning_stage/horizon/decision_id --
+ * já selecionados aqui. Enquanto a migration não for aplicada, o
+ * próprio SELECT falha com "column ... does not exist" (42703), que
+ * classifyFetchError() já reconhece via o regex "does not exist" --
+ * degrada honestamente pra unavailable/schema_not_applied, nunca uma
+ * lista parcial fingindo que o recurso existe.
+ */
 export async function getCompanyRoadmap(
   adminDb: SupabaseClient,
   companyId: string,
@@ -172,7 +181,7 @@ export async function getCompanyRoadmap(
   try {
     const { data, error } = await adminDb
       .from("roadmap_items")
-      .select("id, client_id, source_type, source_id, title, description, priority, status, destination_capability, due_date, project_id, created_at")
+      .select("id, client_id, source_type, source_id, title, description, priority, status, destination_capability, due_date, project_id, created_at, planning_stage, horizon, decision_id")
       .eq("client_id", companyId);
     if (error) return { status: "unavailable", reason: classifyFetchError("roadmap_items", error) };
     const rows = [...(data ?? [])].sort(byPriorityThenCreatedDesc);
@@ -182,9 +191,46 @@ export async function getCompanyRoadmap(
         id: r.id, companyId: r.client_id, sourceType: r.source_type, sourceId: r.source_id,
         title: r.title, description: r.description, priority: r.priority, status: r.status,
         destinationCapability: r.destination_capability, dueDate: r.due_date, projectId: r.project_id,
+        planningStage: r.planning_stage, horizon: r.horizon, decisionId: r.decision_id,
       })),
     };
   } catch (err) {
     return { status: "unavailable", reason: classifyFetchError("roadmap_items", err) };
+  }
+}
+
+export type RoadmapWriteResult =
+  | { ok: true; id: string }
+  | { ok: false; reason: SourceFetchReason };
+
+/**
+ * "Próxima Janela" (seção 11) — registrar uma ideia nova, sempre
+ * começando em planningStage="idea" (nunca em "approved" -- só uma
+ * Decisão explícita promove o estágio, nunca a criação em si).
+ */
+export async function createRoadmapItem(
+  adminDb: SupabaseClient,
+  companyId: string,
+  input: { title: string; description?: string | null; horizon?: RoadmapItem["horizon"]; priority?: FindingPriority },
+): Promise<RoadmapWriteResult> {
+  try {
+    const { data, error } = await adminDb
+      .from("roadmap_items")
+      .insert({
+        client_id: companyId,
+        source_type: "manual",
+        title: input.title,
+        description: input.description ?? null,
+        priority: input.priority ?? "medium",
+        status: "planned",
+        planning_stage: "idea",
+        horizon: input.horizon ?? "next_window",
+      })
+      .select("id")
+      .single();
+    if (error) return { ok: false, reason: classifyFetchError("roadmap_items", error) };
+    return { ok: true, id: data.id as string };
+  } catch (err) {
+    return { ok: false, reason: classifyFetchError("roadmap_items", err) };
   }
 }

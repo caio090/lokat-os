@@ -28,6 +28,16 @@ export type RecommendationStatus = "suggested" | "accepted" | "dismissed";
  * como entidade -- nenhum estado criado para ela. */
 export type RoadmapItemStatus = "planned" | "in_progress" | "completed" | "cancelled";
 export type RoadmapSourceType = "diagnostic_recommendation" | "radar" | "manual";
+/**
+ * SQL 99 (DB MIGRATION PENDING em Production no momento em que este
+ * código foi escrito) — "Próxima Janela" (retomada do produto, seção
+ * 11): uma ideia nunca pula direto pra execução. Eixo independente de
+ * `status` acima -- só planningStage="approved" habilita status virar
+ * "in_progress" na prática (regra de produto, não imposta pelo tipo).
+ */
+export type RoadmapPlanningStage = "idea" | "pre_planning" | "in_analysis" | "awaiting_decision" | "approved" | "cancelled";
+/** SQL 99 — planejamento contínuo em três tempos (seção 10). null = item antigo, sem horizonte classificado ainda. */
+export type RoadmapHorizon = "retrospective" | "immediate" | "next_window" | null;
 
 export interface CompanyDiagnostic {
   id: string;
@@ -99,6 +109,12 @@ export interface RoadmapItem {
   destinationCapability: RecommendationCapability | null;
   dueDate: string | null;
   projectId: string | null;
+  /** SQL 99 (DB MIGRATION PENDING) */
+  planningStage: RoadmapPlanningStage;
+  /** SQL 99 (DB MIGRATION PENDING) */
+  horizon: RoadmapHorizon;
+  /** SQL 99 (DB MIGRATION PENDING) */
+  decisionId: string | null;
 }
 
 /**
