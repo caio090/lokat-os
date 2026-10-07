@@ -17,6 +17,9 @@ import { MeuDiaBlock } from "./_meu-dia";
 import { QuickActionMenu } from "@/components/quick-action-menu";
 import { getWorkspacePreviewContext } from "@/lib/workspaces/context";
 import type { WorkspaceSurface } from "@/lib/workspaces/types";
+import { createSupabaseAdminClient, hasSupabaseServiceRoleKey } from "@/lib/supabase/server";
+import { getOnboardingAttentionItems } from "@/lib/client-onboarding/adapters";
+import type { OnboardingAttentionItem } from "@/lib/client-onboarding/types";
 
 interface RealApproval {
   id: string;
@@ -43,6 +46,7 @@ export default async function AdminDashboardPage() {
   let contentsCount    = 0;
   let pendingTeamCount = 0;
   let adminSuggestions: Awaited<ReturnType<typeof getAdminSuggestions>> = [];
+  let onboardingAttentionItems: OnboardingAttentionItem[] = [];
 
   if (isSupabaseConfigured) {
     try {
@@ -88,6 +92,14 @@ export default async function AdminDashboardPage() {
       contentsCount    = recentContents.length;
       pendingTeamCount = teamReqRes.count ?? 0;
       adminSuggestions = await getAdminSuggestions(supabase);
+
+      // FASE 1C, seção 12 -- onboardings parados entram na Central do Dia
+      // da agência. DB MIGRATION PENDING (SQL 101) -- degrada para lista
+      // vazia honestamente enquanto a tabela não existe, nunca quebra o resto do dashboard.
+      if (hasSupabaseServiceRoleKey()) {
+        const attentionResult = await getOnboardingAttentionItems(createSupabaseAdminClient());
+        if (attentionResult.status === "available") onboardingAttentionItems = attentionResult.data;
+      }
     } catch {}
   }
 
@@ -186,7 +198,7 @@ export default async function AdminDashboardPage() {
       </div>
 
       {/* ── Meu Dia / Produtividade ── */}
-      <MeuDiaBlock pendingApprovals={pendingApprovals} />
+      <MeuDiaBlock pendingApprovals={pendingApprovals} onboardingAttentionItems={onboardingAttentionItems} />
 
       {/* ContentOS quick access */}
       <ContentOSAdminCard clients={clients} />

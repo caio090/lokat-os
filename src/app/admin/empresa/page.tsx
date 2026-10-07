@@ -19,7 +19,11 @@ import { getClientTimeline } from "@/lib/client-timeline/adapters";
 import { getClientOpportunities } from "@/lib/client-opportunities/adapters";
 import { getClientProjects } from "@/lib/client-projects-admin/adapters";
 import { getClientMeetings, getClientProposals } from "@/lib/client-commercial/adapters";
+import { getClientJourney } from "@/lib/client-journey/adapters";
+import { getOnboardingSummary, getOnboardingItems, listOnboardingTemplates } from "@/lib/client-onboarding/adapters";
+import { getClientHealthSnapshot } from "@/lib/client-health/adapters";
 import { EmpresaRelationshipPanel } from "./_empresa-relationship-panel";
+import { EmpresaJourneyPanel } from "./_empresa-journey-panel";
 
 /**
  * Sprint MVP Dogfood Spine V0.1 (Bloco D) — Company Central mínima.
@@ -69,6 +73,7 @@ export default async function AdminEmpresaPage({
     projects, workItems, diagnosticResult,
     decisionsResult, roadmapResult, timelineResult, opportunitiesResult, clientProjectsResult,
     meetingsResult, proposalsResult,
+    journeyResult, onboardingSummaryResult, onboardingTemplatesResult, healthResult,
   ] = await Promise.all([
     getProjectProjections(adminDb, context.companyId),
     getWorkItemProjections(adminDb, context.companyId),
@@ -80,7 +85,17 @@ export default async function AdminEmpresaPage({
     getClientProjects(adminDb, context.companyId),
     getClientMeetings(adminDb, context.companyId),
     getClientProposals(adminDb, context.companyId),
+    getClientJourney(adminDb, context.companyId),
+    getOnboardingSummary(adminDb, context.companyId),
+    listOnboardingTemplates(adminDb),
+    getClientHealthSnapshot(adminDb, context.companyId),
   ]);
+  // Seção 11 do brief (FASE 1C) -- itens do onboarding ativo, só quando
+  // existe um (evita uma segunda query condenada quando a Company nunca
+  // iniciou onboarding ou a migration 101 ainda está pendente).
+  const onboardingItemsResult = onboardingSummaryResult.status === "available" && onboardingSummaryResult.data
+    ? await getOnboardingItems(adminDb, onboardingSummaryResult.data.onboarding.id)
+    : null;
   // Fase 27/68 — só busca Findings quando já existe um diagnóstico real
   // (evita uma segunda query condenada a "unavailable" quando o schema 91
   // ainda não foi aplicado, ou quando a Company nunca iniciou um).
@@ -100,6 +115,19 @@ export default async function AdminEmpresaPage({
       <PageHeader
         title={view.identity.companyName ?? "Empresa"}
         description={`Painel da Empresa · ${SURFACE_LABELS[view.identity.surface]}${context.preview ? " · Visualização (somente leitura)" : ""}`}
+      />
+
+      {/* FASE 1C — Jornada do cliente (seção 10/11/12/15/16): visão
+          macro + resumo do onboarding + saúde do relacionamento. Vem
+          logo abaixo do título de propósito -- "bater o olho e
+          entender onde esse cliente está" é a primeira coisa da tela. */}
+      <EmpresaJourneyPanel
+        companyId={context.companyId}
+        journeyResult={journeyResult}
+        onboardingSummaryResult={onboardingSummaryResult}
+        onboardingItemsResult={onboardingItemsResult}
+        onboardingTemplatesResult={onboardingTemplatesResult}
+        healthResult={healthResult}
       />
 
       {/* Diagnóstico (Fase 26/27/68) — só renderiza quando o schema 91 já
@@ -230,6 +258,7 @@ export default async function AdminEmpresaPage({
         clientProjectsResult={clientProjectsResult}
         meetingsResult={meetingsResult}
         proposalsResult={proposalsResult}
+        activeOnboardingId={onboardingSummaryResult.status === "available" ? (onboardingSummaryResult.data?.onboarding.id ?? null) : null}
       />
 
       {/* Atalhos */}

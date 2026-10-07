@@ -19,9 +19,30 @@ export const EVENT_POLICY: Record<IntegrationEventType, IntegrationEventPolicy> 
   PROJECT_STATUS_CHANGED: "UPDATE_PROJECT",
   CLIENT_PENDING_CREATED: "REQUIRE_HUMAN_REVIEW",
   TEAM_ACTION_REQUIRED: "CREATE_TASK",
+  // FASE 1C (seção 14) -- marcos de onboarding vindos de um sistema
+  // externo. Resolução "qual item/onboarding exatamente" ainda não
+  // existe (precisaria de um external_id por item, não só por
+  // Company) -- por isso nenhum destes atualiza um item automaticamente
+  // nesta fase; todos só notificam/exigem revisão humana (mesmo
+  // princípio de TEAM_ACTION_REQUIRED/PROJECT_STATUS_CHANGED da FASE 1B).
+  ONBOARDING_STARTED: "CREATE_NOTIFICATION",
+  ONBOARDING_ITEM_REQUESTED: "CREATE_NOTIFICATION",
+  ONBOARDING_ITEM_COMPLETED: "CREATE_NOTIFICATION",
+  CLIENT_ASSET_SUBMITTED: "CREATE_NOTIFICATION",
+  SCOPE_APPROVED: "REQUIRE_HUMAN_REVIEW",
+  SCOPE_REJECTED: "REQUIRE_HUMAN_REVIEW",
+  KICKOFF_READY: "CREATE_NOTIFICATION",
+  KICKOFF_COMPLETED: "CREATE_NOTIFICATION",
 };
 
-/** Políticas que sempre também geram uma notificação, além da ação própria (seção 10). */
+/**
+ * Políticas que sempre também geram uma notificação, além da ação
+ * própria (seção 10) -- só precisa listar event_types cuja política
+ * NÃO é por si só CREATE_NOTIFICATION/REQUIRE_HUMAN_REVIEW (essas duas
+ * já notificam incondicionalmente no router, ver router.ts). Todos os
+ * 8 event_types novos da FASE 1C (seção 14) já caem numa dessas duas
+ * políticas -- nenhuma entrada nova necessária aqui.
+ */
 export const ALWAYS_NOTIFY_EVENT_TYPES: ReadonlySet<IntegrationEventType> = new Set([
-  "MEETING_REQUESTED", "UPSELL_INTERESTED", "APPROVAL_REQUESTED", "BLOCKER_CREATED", "TEAM_ACTION_REQUIRED",
+  "MEETING_REQUESTED", "UPSELL_INTERESTED", "BLOCKER_CREATED", "TEAM_ACTION_REQUIRED",
 ]);

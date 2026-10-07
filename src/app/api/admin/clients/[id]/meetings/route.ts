@@ -32,6 +32,9 @@ export const POST = withMutationProtection(async function POST(req: Request, { p
     description: typeof body.description === "string" ? body.description : null,
     durationMin: typeof body.durationMin === "number" ? body.durationMin : undefined,
     meetLink: typeof body.meetLink === "string" ? body.meetLink : null,
+    // FASE 1C, seção 7 -- reunião de alinhamento é um marco do onboarding (SQL 101, DB MIGRATION PENDING).
+    onboardingId: typeof body.onboardingId === "string" ? body.onboardingId : null,
+    isAlignmentMeeting: body.isAlignmentMeeting === true,
   });
   if (!result.ok) {
     if (result.reason === "schema_not_applied") {

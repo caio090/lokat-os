@@ -23,6 +23,16 @@ export const INTEGRATION_EVENT_TYPES = [
   "PROJECT_STATUS_CHANGED",
   "CLIENT_PENDING_CREATED",
   "TEAM_ACTION_REQUIRED",
+  // FASE 1C (seção 14) -- mesmo endpoint genérico, nunca uma rota
+  // especial de onboarding. Reaproveita POST /api/integrations/events.
+  "ONBOARDING_STARTED",
+  "ONBOARDING_ITEM_REQUESTED",
+  "ONBOARDING_ITEM_COMPLETED",
+  "CLIENT_ASSET_SUBMITTED",
+  "SCOPE_APPROVED",
+  "SCOPE_REJECTED",
+  "KICKOFF_READY",
+  "KICKOFF_COMPLETED",
 ] as const;
 export type IntegrationEventType = (typeof INTEGRATION_EVENT_TYPES)[number];
 

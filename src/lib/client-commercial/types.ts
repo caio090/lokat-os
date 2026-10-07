@@ -21,6 +21,10 @@ export interface ClientMeeting {
   status: ClientMeetingStatus;
   notes: string | null;
   createdAt: string;
+  /** FASE 1C (DB MIGRATION PENDING -- SQL 101). null = reunião não ligada a nenhum onboarding (ex.: upsell pós-venda comum). */
+  onboardingId: string | null;
+  /** FASE 1C -- marca a primeira reunião pós-contrato (seção 7), nunca inferido -- sempre setado explicitamente na criação. */
+  isAlignmentMeeting: boolean;
 }
 
 export interface ClientProposal {

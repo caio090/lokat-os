@@ -64,7 +64,7 @@ async function postJson(url: string, body: unknown): Promise<{ ok: boolean; erro
 }
 
 export function EmpresaRelationshipPanel({
-  companyId, decisionsResult, roadmapResult, timelineResult, opportunitiesResult, clientProjectsResult, meetingsResult, proposalsResult,
+  companyId, decisionsResult, roadmapResult, timelineResult, opportunitiesResult, clientProjectsResult, meetingsResult, proposalsResult, activeOnboardingId,
 }: {
   companyId: string;
   decisionsResult: DecisionFetchResult<CompanyDecision[]>;
@@ -74,12 +74,14 @@ export function EmpresaRelationshipPanel({
   clientProjectsResult: ClientProjectFetchResult<ClientProject[]>;
   meetingsResult: ClientCommercialFetchResult<ClientMeeting[]>;
   proposalsResult: ClientCommercialFetchResult<ClientProposal[]>;
+  /** FASE 1C, seção 7 -- quando existe um onboarding ativo, a reunião agendada pode ser marcada como a reunião de alinhamento dele (reaproveita esta mesma entidade de reunião, nunca um sistema paralelo). */
+  activeOnboardingId?: string | null;
 }) {
   return (
     <>
       <DecisionsSection companyId={companyId} result={decisionsResult} />
       <NextWindowSection companyId={companyId} result={roadmapResult} />
-      <CommercialRelationshipSection companyId={companyId} meetingsResult={meetingsResult} proposalsResult={proposalsResult} />
+      <CommercialRelationshipSection companyId={companyId} meetingsResult={meetingsResult} proposalsResult={proposalsResult} activeOnboardingId={activeOnboardingId ?? null} />
       <OpportunitiesSection companyId={companyId} result={opportunitiesResult} />
       <ClientProjectsSection companyId={companyId} result={clientProjectsResult} />
       <TimelineSection result={timelineResult} />
@@ -244,12 +246,13 @@ function NextWindowSection({ companyId, result }: { companyId: string; result: S
 // ── Relacionamento Comercial (reunião/proposta pós-venda) ──────
 
 function CommercialRelationshipSection({
-  companyId, meetingsResult, proposalsResult,
-}: { companyId: string; meetingsResult: ClientCommercialFetchResult<ClientMeeting[]>; proposalsResult: ClientCommercialFetchResult<ClientProposal[]> }) {
+  companyId, meetingsResult, proposalsResult, activeOnboardingId,
+}: { companyId: string; meetingsResult: ClientCommercialFetchResult<ClientMeeting[]>; proposalsResult: ClientCommercialFetchResult<ClientProposal[]>; activeOnboardingId: string | null }) {
   const router = useRouter();
   const [meetingOpen, setMeetingOpen] = useState(false);
   const [meetingTitle, setMeetingTitle] = useState("");
   const [meetingDate, setMeetingDate] = useState("");
+  const [isAlignmentMeeting, setIsAlignmentMeeting] = useState(false);
   const [proposalOpen, setProposalOpen] = useState(false);
   const [proposalTitle, setProposalTitle] = useState("");
   const [saving, setSaving] = useState(false);
@@ -258,10 +261,13 @@ function CommercialRelationshipSection({
   async function submitMeeting() {
     setSaving(true);
     setError(null);
-    const res = await postJson(`/api/admin/clients/${encodeURIComponent(companyId)}/meetings`, { title: meetingTitle, scheduledAt: meetingDate ? new Date(meetingDate).toISOString() : new Date().toISOString() });
+    const res = await postJson(`/api/admin/clients/${encodeURIComponent(companyId)}/meetings`, {
+      title: meetingTitle, scheduledAt: meetingDate ? new Date(meetingDate).toISOString() : new Date().toISOString(),
+      ...(isAlignmentMeeting && activeOnboardingId ? { onboardingId: activeOnboardingId, isAlignmentMeeting: true } : {}),
+    });
     setSaving(false);
     if (!res.ok) { setError(res.error ?? "Erro"); return; }
-    setMeetingTitle(""); setMeetingDate(""); setMeetingOpen(false);
+    setMeetingTitle(""); setMeetingDate(""); setIsAlignmentMeeting(false); setMeetingOpen(false);
     router.refresh();
   }
   async function submitProposal() {
@@ -302,6 +308,12 @@ function CommercialRelationshipSection({
                 <div className="mt-2 space-y-2">
                   <input value={meetingTitle} onChange={(e) => setMeetingTitle(e.target.value)} placeholder="Título (ex.: Revisão mensal)" className={inputCls} />
                   <input type="datetime-local" value={meetingDate} onChange={(e) => setMeetingDate(e.target.value)} className={inputCls} />
+                  {activeOnboardingId && (
+                    <label className="flex items-center gap-1.5 text-[11px] text-gray-500">
+                      <input type="checkbox" checked={isAlignmentMeeting} onChange={(e) => setIsAlignmentMeeting(e.target.checked)} />
+                      Esta é a reunião de alinhamento do onboarding
+                    </label>
+                  )}
                   <SaveButton onClick={submitMeeting} disabled={!meetingTitle.trim()} saving={saving} />
                 </div>
               )}
@@ -437,12 +449,30 @@ function ClientProjectsSection({ companyId, result }: { companyId: string; resul
         <div className="space-y-1.5 mb-2">
           {result.data.length === 0 && <p className="text-xs text-gray-400">Nenhum projeto do cliente registrado ainda.</p>}
           {result.data.map((p) => (
-            <div key={p.id} className="border border-gray-100 rounded-xl p-2.5 flex items-center justify-between gap-2">
-              <div>
-                <p className="text-sm text-gray-700">{p.title}</p>
-                {p.scopeCategory && <p className="text-[10px] text-gray-400">{SCOPE_LABEL[p.scopeCategory] ?? p.scopeCategory}</p>}
+            <div key={p.id} className="border border-gray-100 rounded-xl p-2.5 space-y-1">
+              <div className="flex items-center justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="text-sm text-gray-700 truncate">{p.title}</p>
+                  <p className="text-[10px] text-gray-400 flex flex-wrap gap-x-1.5">
+                    {p.projectType && <span>{p.projectType}</span>}
+                    {p.scopeCategory && <span>{SCOPE_LABEL[p.scopeCategory] ?? p.scopeCategory}</span>}
+                    {p.currentPhase && <span>{p.currentPhase}</span>}
+                  </p>
+                </div>
+                <div className="text-right flex-shrink-0">
+                  <span className="text-[10px] font-bold text-gray-400">{p.status}</span>
+                  <p className="text-[10px] text-gray-400">{p.progress}%</p>
+                </div>
               </div>
-              <span className="text-[10px] font-bold text-gray-400">{p.status}</span>
+              {/* FASE 1C, seção 19 -- "não tentar criar um Jira inteiro": só o essencial pra entender onde o projeto está travado. */}
+              {(p.nextAction || p.blockedReason || p.clientDependency || p.dueDate) && (
+                <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] pt-1 border-t border-gray-50">
+                  {p.nextAction && <span className="text-indigo-600">Próxima ação: {p.nextAction}</span>}
+                  {p.blockedReason && <span className="text-red-600">Bloqueio: {p.blockedReason}</span>}
+                  {p.clientDependency && <span className="text-amber-600">Depende do cliente: {p.clientDependency}</span>}
+                  {p.dueDate && <span className="text-gray-400">Prazo: {new Date(p.dueDate).toLocaleDateString("pt-BR")}</span>}
+                </div>
+              )}
             </div>
           ))}
         </div>

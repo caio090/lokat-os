@@ -108,3 +108,42 @@ test("TEAM_ACTION_REQUIRED / PROJECT_STATUS_CHANGED -- limitação documentada d
   // Seção 10 do brief lista TEAM_ACTION_REQUIRED entre os "sempre notificar" -- PROJECT_STATUS_CHANGED não está nessa lista nem usa uma política que notifica.
   assert.equal(getNotifyCalls(), 1, "só TEAM_ACTION_REQUIRED notifica aqui (está na lista fixa da seção 10); PROJECT_STATUS_CHANGED não notifica nesta fase");
 });
+
+// FASE 1C, seção 14/23 -- os 8 novos event_types de onboarding vindos do
+// Cérebro Tayannara (ou qualquer outro sistema externo), reaproveitando
+// a MESMA ponte genérica (nenhuma rota especial). Nenhum atualiza um
+// item/onboarding automaticamente ainda (resolução externa não existe
+// nesta fase) -- todos só notificam/exigem revisão humana.
+test("ONBOARDING_STARTED / ONBOARDING_ITEM_REQUESTED / ONBOARDING_ITEM_COMPLETED / CLIENT_ASSET_SUBMITTED -- CREATE_NOTIFICATION, nenhuma entidade criada, sempre notifica", async (t) => {
+  const { routeIntegrationEvent, getNotifyCalls, getTimelineCalls } = await loadRouterWith(t, {});
+  const eventTypes = ["ONBOARDING_STARTED", "ONBOARDING_ITEM_REQUESTED", "ONBOARDING_ITEM_COMPLETED", "CLIENT_ASSET_SUBMITTED"] as const;
+  for (const [i, eventType] of eventTypes.entries()) {
+    const result = await routeIntegrationEvent({}, basePayload({ event_type: eventType, event_id: `evt_onb_${i}` }), "company-tayannara");
+    assert.equal(result.policy, "CREATE_NOTIFICATION", `${eventType} usa CREATE_NOTIFICATION -- resolução de item externo ainda não existe nesta fase`);
+    assert.equal(result.createdEntity, null, `${eventType} nunca cria/atualiza um item de onboarding sozinho -- um humano confirma pela UI`);
+  }
+  assert.equal(getNotifyCalls(), eventTypes.length, "todos os 4 notificam (CREATE_NOTIFICATION sempre notifica, ver router.ts)");
+  assert.equal(getTimelineCalls(), eventTypes.length, "timeline recebe todos os 4, independente da política");
+});
+
+test("SCOPE_APPROVED / SCOPE_REJECTED -- REQUIRE_HUMAN_REVIEW, nenhuma entidade criada automaticamente, mas notifica (decisão de escopo nunca é automática)", async (t) => {
+  const { routeIntegrationEvent, getNotifyCalls } = await loadRouterWith(t, {});
+  const approved = await routeIntegrationEvent({}, basePayload({ event_type: "SCOPE_APPROVED" }), "company-tayannara");
+  const rejected = await routeIntegrationEvent({}, basePayload({ event_type: "SCOPE_REJECTED", event_id: "evt_2" }), "company-tayannara");
+  assert.equal(approved.policy, "REQUIRE_HUMAN_REVIEW");
+  assert.equal(rejected.policy, "REQUIRE_HUMAN_REVIEW");
+  assert.equal(approved.createdEntity, null, "aprovação de escopo externa nunca libera um projeto sozinha");
+  assert.equal(rejected.createdEntity, null, "rejeição de escopo externa nunca altera nada sozinha");
+  assert.equal(getNotifyCalls(), 2, "ambos notificam -- REQUIRE_HUMAN_REVIEW sempre notifica");
+});
+
+test("KICKOFF_READY / KICKOFF_COMPLETED -- CREATE_NOTIFICATION, nenhuma transição de status de onboarding automática", async (t) => {
+  const { routeIntegrationEvent, getNotifyCalls } = await loadRouterWith(t, {});
+  const ready = await routeIntegrationEvent({}, basePayload({ event_type: "KICKOFF_READY" }), "company-tayannara");
+  const completed = await routeIntegrationEvent({}, basePayload({ event_type: "KICKOFF_COMPLETED", event_id: "evt_2" }), "company-tayannara");
+  assert.equal(ready.policy, "CREATE_NOTIFICATION");
+  assert.equal(completed.policy, "CREATE_NOTIFICATION");
+  assert.equal(ready.createdEntity, null, "evento externo nunca marca READY_FOR_KICKOFF sozinho -- a transição real é feita pela UI (PATCH /onboarding)");
+  assert.equal(completed.createdEntity, null, "evento externo nunca marca COMPLETED sozinho");
+  assert.equal(getNotifyCalls(), 2);
+});

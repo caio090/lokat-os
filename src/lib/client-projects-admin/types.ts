@@ -27,6 +27,15 @@ export interface ClientProject {
   visibleToClient: boolean;
   /** SQL 99 (DB MIGRATION PENDING) -- null enquanto a migration não aplicada (coluna não lida ainda, ver nota no adapter). */
   scopeCategory: ScopeCategory | null;
+  /** FASE 1C / SQL 101 (DB MIGRATION PENDING) -- seção 19, visual de projetos. Todos null enquanto a migration não aplicada, mesmo fallback defensivo de scopeCategory. */
+  projectType: string | null;
+  currentPhase: string | null;
+  ownerId: string | null;
+  nextAction: string | null;
+  blockedReason: string | null;
+  clientDependency: string | null;
+  /** FASE 1C / SQL 101 -- seção 17: projeto nasce do escopo confirmado de um onboarding (null quando criado fora desse fluxo). */
+  onboardingId: string | null;
   createdAt: string;
   updatedAt: string;
 }

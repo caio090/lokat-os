@@ -39,6 +39,9 @@ export const POST = withMutationProtection(async function POST(req: Request, { p
     dueDate: typeof body.dueDate === "string" ? body.dueDate : null,
     visibleToClient: typeof body.visibleToClient === "boolean" ? body.visibleToClient : undefined,
     scopeCategory,
+    // FASE 1C, seção 17/19 -- projeto nasce do escopo confirmado de um onboarding (SQL 101, DB MIGRATION PENDING).
+    projectType: typeof body.projectType === "string" ? body.projectType : null,
+    onboardingId: typeof body.onboardingId === "string" ? body.onboardingId : null,
   });
   if (!result.ok) {
     if (result.reason === "schema_not_applied") {

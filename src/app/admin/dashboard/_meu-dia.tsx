@@ -1,6 +1,7 @@
 "use client";
 import { useState } from "react";
 import { CheckSquare, Clock, AlertTriangle } from "lucide-react";
+import type { OnboardingAttentionItem } from "@/lib/client-onboarding/types";
 
 interface Approval {
   id: string;
@@ -9,9 +10,11 @@ interface Approval {
 
 interface Props {
   pendingApprovals: Approval[];
+  /** FASE 1C, seção 12 -- onboardings parados de qualquer Company da agência. DB MIGRATION PENDING (SQL 101) -- [] enquanto a migration não aplicada. */
+  onboardingAttentionItems?: OnboardingAttentionItem[];
 }
 
-export function MeuDiaBlock({ pendingApprovals }: Props) {
+export function MeuDiaBlock({ pendingApprovals, onboardingAttentionItems = [] }: Props) {
   const [taskModalOpen,    setTaskModalOpen]    = useState(false);
   const [meetingModalOpen, setMeetingModalOpen] = useState(false);
 
@@ -64,12 +67,18 @@ export function MeuDiaBlock({ pendingApprovals }: Props) {
         </div>
         <div className="p-3.5 bg-amber-50 rounded-xl border border-amber-100">
           <p className="text-[10px] font-bold text-amber-500 uppercase tracking-widest mb-2">Pendências urgentes</p>
-          {pendingApprovals.length > 0 ? (
+          {pendingApprovals.length > 0 || onboardingAttentionItems.length > 0 ? (
             <div className="space-y-1.5">
               {pendingApprovals.slice(0, 2).map((a) => (
                 <a key={a.id} href="/admin/contentos/aprovacoes" className="flex items-center gap-1.5 text-xs text-amber-700 hover:underline">
                   <AlertTriangle className="w-3 h-3 flex-shrink-0" />
                   <span className="truncate">{a.content_items?.[0]?.title ?? "Aprovação pendente"}</span>
+                </a>
+              ))}
+              {onboardingAttentionItems.slice(0, 2).map((o) => (
+                <a key={o.itemId} href={`/admin/empresa?client=${encodeURIComponent(o.companyId)}`} className="flex items-center gap-1.5 text-xs text-amber-700 hover:underline">
+                  <AlertTriangle className="w-3 h-3 flex-shrink-0" />
+                  <span className="truncate">{o.message}</span>
                 </a>
               ))}
             </div>
