@@ -15,15 +15,17 @@ function mkv(id: string, title: string, file: string, category: string, order: n
   return { id, title, client_name: "Sandubão", category, video_url: recUrl(file), storage_path: file, thumbnail_url: null, is_public: true, is_featured: false, is_feedback: false, show_in_cards: true, sort_order: order, status: "active", description: null, created_at: "" };
 }
 
-// Filenames exatos do bucket rec-videos no Supabase Storage
+// Filenames exatos do bucket rec-videos no Supabase Storage.
+// HOTFIX (auditoria de Cached Egress) — s1 a s6 apontavam pra arquivos
+// que JÁ NÃO EXISTEM no bucket (duhlanche1-4.mp4, dulanche5.mp4, "VT HP
+// II 30 SEG V2.mp4"), confirmado via storage.objects e edge_logs (GETs
+// reais de visitantes/grade do portfólio voltando 404/402 pra arquivo
+// inexistente). Removidos -- nunca eram escolhidos pelo Hero (heroVideoA
+// em page.tsx usa .find() e s0 sempre vence primeiro), só geravam
+// requests mortos pros cards da grade pública. s0 é o único arquivo
+// real desta lista e continua intocado.
 export const STATIC_VIDEOS: RecVideo[] = [
   mkv("s0", "Dia dos Solteiros",  "duhlache-DIA -DO-SOLTEIRO.mp4", "campanha", 0),
-  { ...mkv("s1", "DUH Lanches",  "duhlanche1.mp4",            "campanha", 1),   client_name: "DUH Lanches" },
-  { ...mkv("s2", "Vol. 2",       "duhlache2.mp4",             "campanha", 2),   client_name: "DUH Lanches" },
-  { ...mkv("s3", "Vol. 3",       "duhlanche3.mp4",            "campanha", 3),   client_name: "DUH Lanches" },
-  { ...mkv("s4", "Vol. 4",       "duhlanche4.mp4",            "campanha", 4),   client_name: "DUH Lanches" },
-  { ...mkv("s5", "Vol. 5",       "dulanche5.mp4",             "campanha", 5),   client_name: "DUH Lanches" },
-  { ...mkv("s6", "VT HP",        "VT HP II 30 SEG V2.mp4",   "institucional", 6), client_name: "DUH Lanches" },
 ];
 
 export const STATIC_FEEDBACK: RecVideo = {

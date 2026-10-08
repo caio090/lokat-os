@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { isSupabaseConfigured, createClient } from "@/lib/supabase/client";
 import { getRoleHome, resolveEffectiveUserRole } from "@/lib/access-control";
+import { classifyLoginAuthError, classifyLoginNetworkError } from "@/lib/auth/classify-login-error";
 import { Eye, EyeOff, Loader2, ShieldCheck, User, Sparkles, TrendingUp, Wallet, GraduationCap, KeyRound, Link2, ArrowRight } from "lucide-react";
 
 const DEMO_ROLES = [
@@ -52,7 +53,7 @@ export default function LoginPage() {
       const { data, error: authError } = await supabase.auth.signInWithPassword({ email, password });
 
       if (authError || !data.user) {
-        setError("E-mail ou senha incorretos.");
+        setError(classifyLoginAuthError(authError).message);
         return;
       }
 
@@ -69,7 +70,7 @@ export default function LoginPage() {
       }) ?? "cliente";
       router.push(getRoleHome(role));
     } catch {
-      setError("Erro de conexão. Verifique sua internet e tente novamente.");
+      setError(classifyLoginNetworkError().message);
     } finally {
       setLoading(false);
     }
