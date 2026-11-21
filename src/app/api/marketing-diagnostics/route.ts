@@ -68,46 +68,59 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Erro ao salvar diagnóstico. Tente novamente." }, { status: 500 });
   }
 
-  // 2. Criar lead em commercial_leads (best-effort)
+  // 2. Criar lead em commercial_leads (best-effort -- mas cada operação
+  // checa `error` explicitamente, nunca confia só em try/catch: o
+  // cliente Supabase normalmente RETORNA um erro em vez de lançar
+  // exceção, então um try/catch sozinho deixava passar falha de
+  // lookup/insert/update em silêncio completo (PROMPT 02, seção 14/15).
+  // Se o LOOKUP falhar, nunca cai pro "senão" e cria um lead novo --
+  // isso poderia duplicar exatamente no caso em que o dedup falhou.
   let leadId: string | null = null;
-  try {
-    const { data: existingLead } = await supabase
+  const { data: existingLead, error: lookupError } = await supabase
+    .from("commercial_leads")
+    .select("id")
+    .eq("contact_phone", normalizedPhone)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (lookupError) {
+    console.error("[marketing-diagnostics] falha ao buscar lead existente (diagnóstico salvo, SEM lead vinculado -- visível em /admin/diagnosticos como 'sem lead')", { diagId: diag?.id, phone: normalizedPhone, error: lookupError.message });
+  } else if (existingLead) {
+    leadId = existingLead.id as string;
+    const { error: updateLeadError } = await supabase.from("commercial_leads").update({
+      notes: `[Diagnóstico de Marketing Local — ${new Date().toLocaleDateString("pt-BR")}]\nOferta: ${offer_suggestion}\nConselho: ${advice}\nProblema: ${main_problem}\nTemperatura: ${lead_temperature}`,
+      pipeline_stage: "diagnostico_realizado",
+    }).eq("id", existingLead.id);
+    if (updateLeadError) console.error("[marketing-diagnostics] lead existente encontrado, mas falha ao atualizar notas/estágio", { leadId, error: updateLeadError.message });
+  } else {
+    const { data: newLead, error: insertLeadError } = await supabase
       .from("commercial_leads")
+      .insert({
+        company_name: input.company_name,
+        contact_name: input.full_name,
+        contact_phone: normalizedPhone,
+        origin: "diagnostico-marketing",
+        interest: offer_suggestion,
+        pipeline_stage: "novo_lead",
+        notes: `[Diagnóstico de Marketing Local]\nProblema: ${main_problem}\nOferta sugerida: ${offer_suggestion}\nConselho: ${advice}\nTemperatura: ${lead_temperature}`,
+      })
       .select("id")
-      .eq("contact_phone", normalizedPhone)
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    if (existingLead) {
-      leadId = existingLead.id;
-      await supabase.from("commercial_leads").update({
-        notes: `[Diagnóstico de Marketing Local — ${new Date().toLocaleDateString("pt-BR")}]\nOferta: ${offer_suggestion}\nConselho: ${advice}\nProblema: ${main_problem}\nTemperatura: ${lead_temperature}`,
-        pipeline_stage: "diagnostico_realizado",
-      }).eq("id", existingLead.id);
+      .single();
+    if (insertLeadError || !newLead) {
+      console.error("[marketing-diagnostics] falha ao criar lead (diagnóstico salvo, SEM lead vinculado -- visível em /admin/diagnosticos como 'sem lead')", { diagId: diag?.id, error: insertLeadError?.message });
     } else {
-      const { data: newLead } = await supabase
-        .from("commercial_leads")
-        .insert({
-          company_name: input.company_name,
-          contact_name: input.full_name,
-          contact_phone: normalizedPhone,
-          origin: "diagnostico-marketing",
-          interest: offer_suggestion,
-          pipeline_stage: "novo_lead",
-          notes: `[Diagnóstico de Marketing Local]\nProblema: ${main_problem}\nOferta sugerida: ${offer_suggestion}\nConselho: ${advice}\nTemperatura: ${lead_temperature}`,
-        })
-        .select("id")
-        .single();
-      if (newLead) leadId = newLead.id;
+      leadId = newLead.id as string;
     }
+  }
 
-    // Vincular diagnóstico ao lead
-    if (leadId && diag?.id) {
-      await supabase.from("marketing_diagnostics").update({ commercial_lead_id: leadId }).eq("id", diag.id);
-    }
-  } catch (e) {
-    console.error("[marketing-diagnostics] Lead error:", e);
+  // Vincular diagnóstico ao lead -- se falhar, o diagnóstico fica
+  // visivelmente "sem lead" em /admin/diagnosticos (commercial_lead_id
+  // IS NULL já é o sinal de recuperação existente, sem precisar de
+  // nenhuma coluna/tabela nova).
+  if (leadId && diag?.id) {
+    const { error: linkError } = await supabase.from("marketing_diagnostics").update({ commercial_lead_id: leadId }).eq("id", diag.id);
+    if (linkError) console.error("[marketing-diagnostics] lead criado/encontrado, mas falha ao vincular ao diagnóstico", { diagId: diag.id, leadId, error: linkError.message });
   }
 
   // 3. Criar notificação admin (best-effort)

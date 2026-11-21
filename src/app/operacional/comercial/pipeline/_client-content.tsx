@@ -3,6 +3,7 @@ import { useState } from "react";
 import { KanbanSquare, X, Phone, Mail, MessageCircle, CalendarDays, FileText, XCircle, ArrowRightCircle, Loader2, Plus } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { isSupabaseConfigured, createClient } from "@/lib/supabase/client";
+import { convertLeadToClient } from "@/lib/commercial-leads/convert-to-client";
 
 interface Lead {
   id: string;
@@ -18,6 +19,9 @@ interface Lead {
   notes: string | null;
   lost_reason: string | null;
   created_at: string;
+  /** Mapeamento real da retomada LKT (clientes/Supabase) -- client_id/converted_at já existem na tabela base, nunca precisaram de migration. */
+  client_id: string | null;
+  converted_at: string | null;
 }
 
 const PIPELINE_STAGES = [
@@ -55,6 +59,7 @@ function LeadModal({
   const [nextAt,     setNextAt]     = useState(
     initial.next_action_at ? initial.next_action_at.slice(0, 16) : ""
   );
+  const [convertError, setConvertError] = useState<string | null>(null);
 
   async function moveTo(stage: string) {
     if (!isSupabaseConfigured || saving) return;
@@ -98,6 +103,28 @@ function LeadModal({
 
   async function markLost() {
     await moveTo("perdido");
+  }
+
+  /**
+   * LKT (clientes/Supabase) -- o botão "Converter em cliente" só movia
+   * pipeline_stage pra "fechado" (gap confirmado na auditoria: nenhum
+   * registro em `clients` era criado). Lógica real extraída pra
+   * src/lib/commercial-leads/convert-to-client.ts (testável com fake-db).
+   */
+  async function convertToClient() {
+    if (!isSupabaseConfigured || saving) return;
+    setConvertError(null);
+    setSaving(true);
+    try {
+      const supabase = createClient();
+      const { data: { user } } = await supabase.auth.getUser();
+      const result = await convertLeadToClient(supabase, lead, user?.id ?? null);
+      if (!result.ok) { setConvertError(result.message); return; }
+      setLead(result.lead as Lead);
+      onUpdate(result.lead as Lead);
+    } finally {
+      setSaving(false);
+    }
   }
 
   const stage = PIPELINE_STAGES.find((s) => s.key === lead.pipeline_stage);
@@ -241,7 +268,7 @@ function LeadModal({
           </button>
           {lead.pipeline_stage !== "fechado" && (
             <button
-              onClick={() => moveTo("fechado")}
+              onClick={convertToClient}
               disabled={saving || !isSupabaseConfigured}
               className="flex items-center gap-1 text-xs font-bold px-3 py-2 bg-emerald-600 text-white rounded-xl hover:bg-emerald-700 transition-colors disabled:opacity-50 ml-auto"
             >
@@ -249,6 +276,12 @@ function LeadModal({
             </button>
           )}
         </div>
+        {lead.client_id && (
+          <p className="px-5 pb-3 text-[11px] text-emerald-600 font-medium -mt-2">✓ Já convertido em cliente</p>
+        )}
+        {convertError && (
+          <p className="px-5 pb-3 text-[11px] text-red-600 -mt-2">{convertError}</p>
+        )}
       </div>
     </div>
   );

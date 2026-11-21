@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import { buildWhatsappUrl } from "@/lib/marketing-diagnostic";
 import { CLIENT_VISIBLE_STATUSES } from "@/lib/client-visibility";
+import { recoverDiagnosticLead } from "@/lib/commercial-leads/recover-diagnostic-lead";
 
 // ── Tipos ─────────────────────────────────────────────────────────────────────
 type StatusKey = "completo" | "parcial" | "pendente" | "aguardando_conexao" | "aguardando_leitura";
@@ -239,6 +240,8 @@ interface MktDiag {
   offer_suggestion: string | null;
   advice: string | null;
   status: string;
+  /** LKT PROMPT 02, seção 15/16 -- único jeito hoje de saber se o lead foi mesmo criado/vinculado (best-effort em marketing-diagnostics/route.ts: pode falhar silenciosamente). null = diagnóstico salvo, mas sem vínculo comercial -- precisa de atenção manual. */
+  commercial_lead_id: string | null;
 }
 
 const TEMP_ICON: Record<string, { icon: typeof Flame; color: string }> = {
@@ -247,11 +250,32 @@ const TEMP_ICON: Record<string, { icon: typeof Flame; color: string }> = {
   frio:   { icon: Snowflake,   color: "text-blue-400"  },
 };
 
-function MktDiagModal({ d, onClose }: { d: MktDiag; onClose: () => void }) {
+function MktDiagModal({ d: initial, onClose, onUpdated }: { d: MktDiag; onClose: () => void; onUpdated: (updated: MktDiag) => void }) {
+  const [d, setD] = useState(initial);
+  const [recovering, setRecovering] = useState(false);
+  const [recoverError, setRecoverError] = useState<string | null>(null);
   const temp = TEMP_ICON[d.lead_temperature] ?? TEMP_ICON.morno;
   const TempIcon = temp.icon;
   const waMsg = `Olá, ${d.full_name}. Aqui é da Lokat. Recebemos o diagnóstico da ${d.company_name} e vi que o principal ponto hoje é ${d.main_problem}. Podemos te mostrar os próximos passos?`;
   const waUrl = buildWhatsappUrl(d.whatsapp, waMsg);
+
+  /** PROMPT 03, seção 5 -- recuperação real, não só o aviso visual. */
+  async function recoverLead() {
+    if (!isSupabaseConfigured || recovering) return;
+    setRecoverError(null);
+    setRecovering(true);
+    try {
+      const supabase = createClient();
+      const { data: { user } } = await supabase.auth.getUser();
+      const result = await recoverDiagnosticLead(supabase, d, user?.id ?? null);
+      if (!result.ok) { setRecoverError(result.message); return; }
+      const updated = result.diagnostic as MktDiag;
+      setD(updated);
+      onUpdated(updated);
+    } finally {
+      setRecovering(false);
+    }
+  }
 
   return (
     <div onClick={onClose} className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
@@ -281,6 +305,28 @@ function MktDiagModal({ d, onClose }: { d: MktDiag; onClose: () => void }) {
               </div>
             ))}
           </div>
+
+          {!d.commercial_lead_id && (
+            <div className="bg-red-50 border border-red-100 rounded-xl p-3 space-y-2">
+              <div className="flex items-start gap-2">
+                <AlertCircle className="w-3.5 h-3.5 text-red-500 flex-shrink-0 mt-0.5" />
+                <p className="text-[11px] text-red-700">
+                  Este diagnóstico não foi vinculado a nenhum lead comercial (falha no momento do envio). O contato chegou, mas não entrou no pipeline.
+                </p>
+              </div>
+              <button
+                onClick={recoverLead}
+                disabled={recovering || !isSupabaseConfigured}
+                className="text-[11px] font-bold px-3 py-1.5 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 transition-colors"
+              >
+                {recovering ? "Recuperando…" : "Recuperar vínculo"}
+              </button>
+              {recoverError && <p className="text-[10px] text-red-600">{recoverError}</p>}
+            </div>
+          )}
+          {d.commercial_lead_id && (
+            <p className="text-[11px] text-emerald-600 font-medium">✓ Vinculado a um lead comercial</p>
+          )}
 
           <div className="bg-purple-50 border border-purple-100 rounded-xl p-4 space-y-2">
             <div className="flex items-center gap-1.5">
@@ -326,6 +372,11 @@ function MktDiagRow({ d, onSelect }: { d: MktDiag; onSelect: () => void }) {
           d.status === "new" ? "bg-blue-50 text-blue-700 border border-blue-100" : "bg-gray-100 text-gray-500")}>
           {d.status === "new" ? "Novo" : d.status}
         </span>
+        {!d.commercial_lead_id && (
+          <span className="ml-1 text-[9px] font-bold px-2 py-0.5 rounded-full bg-red-50 text-red-600 border border-red-100" title="Diagnóstico sem lead vinculado">
+            sem lead
+          </span>
+        )}
       </td>
     </tr>
   );
@@ -466,7 +517,16 @@ export default function AdminDiagnosticosPage() {
 
   return (
     <div>
-      {mktSelected && <MktDiagModal d={mktSelected} onClose={() => setMktSelected(null)} />}
+      {mktSelected && (
+        <MktDiagModal
+          d={mktSelected}
+          onClose={() => setMktSelected(null)}
+          onUpdated={(updated) => {
+            setMktSelected(updated);
+            setMktDiags((prev) => prev.map((row) => (row.id === updated.id ? updated : row)));
+          }}
+        />
+      )}
 
       {/* Header */}
       <div className="flex items-center justify-between mb-4">
