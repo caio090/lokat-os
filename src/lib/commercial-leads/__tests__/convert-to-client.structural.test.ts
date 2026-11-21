@@ -23,6 +23,9 @@ function fakeDb(opts: {
 }) {
   const insertCalls: Record<string, unknown>[] = [];
   const db = {
+    // PROMPT 04 -- convertLeadToClient tenta a RPC atômica primeiro; nos
+    // testes do fallback em JS, a RPC "não existe" (migration 102 pendente).
+    rpc: () => Promise.resolve({ data: null, error: { code: "42883", message: 'function "convert_lead_to_client" does not exist' } }),
     from: (table: string) => {
       if (table === "clients") {
         return {
@@ -169,6 +172,7 @@ async function main() {
     const createdClientIds: string[] = [];
 
     const db = {
+      rpc: () => Promise.resolve({ data: null, error: { code: "42883", message: 'function "convert_lead_to_client" does not exist' } }),
       from: (table: string) => {
         if (table === "clients") {
           return {

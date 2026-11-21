@@ -1,59 +1,82 @@
 -- ============================================================
--- LOKAT OS — SQL 103 · is_admin() não reconhece super_admin/operacional
--- STATUS: DB MIGRATION PENDING -- NÃO APLICADA. Preparada na missão
--- PROMPT 03 (comercial/conversão), achado via simulação REAL de RLS
--- (transação com SET LOCAL ROLE authenticated + request.jwt.claims,
--- revertida -- nunca tocou dado real), não por leitura de policy.
+-- LOKAT OS — SQL 103 · commercial_leads/commercial_meetings/
+-- commercial_proposals/commercial_activities não reconhecem super_admin
+-- STATUS: DB MIGRATION PENDING -- NÃO APLICADA. Revisada na missão
+-- PROMPT 04 após mapear TODOS os usos de is_admin() antes de corrigir
+-- (confirmado via pg_policies: is_admin() só é referenciado nestas 4
+-- policies, em nenhum outro lugar do schema -- nem em outra policy nem
+-- dentro de outra função SQL. Blast radius real = exatamente essas 4
+-- tabelas, nada mais).
 --
--- GAP CONFIRMADO (pré-existente, não introduzido pela conversão nova):
--- `public.is_admin()` só retorna true pra role = 'admin' literal.
--- A policy `admin_all_leads` em `commercial_leads` (FOR ALL USING
--- is_admin()) por isso NUNCA libera super_admin nem operacional --
--- só comercial/sdr/closer DONOS do próprio lead conseguem escrever.
+-- CORREÇÃO MÍNIMA, NÃO GLOBAL (conforme pedido explícito da missão --
+-- "não amplie privilégios de forma global"): NÃO redefine is_admin()
+-- (que continuaria significando "só role=admin" em qualquer outro
+-- lugar que algum dia a use). Em vez disso, troca QUAL função as 4
+-- policies comerciais chamam, pra uma que JÁ EXISTE e JÁ é usada em
+-- outras 7 tabelas do sistema com exatamente essa semântica
+-- (`is_admin_or_super()`, idêntica a `is_admin_user()` -- duas funções
+-- redundantes pré-existentes, nenhuma criada por esta missão):
+--   SELECT EXISTS (SELECT 1 FROM profiles WHERE id=auth.uid() AND role IN ('admin','super_admin'))
+-- Ou seja: super_admin passa a ter, em commercial_leads/meetings/
+-- proposals/activities, o MESMO acesso que já tem em client_files,
+-- client_portal_settings, client_project_tasks, client_projects,
+-- client_user_access (todas já usam is_admin_or_super()) -- consistência
+-- com um padrão já estabelecido, não um privilégio novo inventado.
 --
--- IMPACTO REAL: um usuário super_admin ou operacional, hoje, NÃO
--- consegue:
---   - mover um lead de estágio no pipeline (`moveTo()`,
---     src/app/operacional/comercial/pipeline/_client-content.tsx --
---     já existia antes desta missão, sempre teve esse problema);
---   - completar "Converter em cliente" (convertLeadToClient) -- o
---     cliente chega a ser criado, mas o vínculo final falha
---     silenciosamente (0 linhas afetadas pela RLS, sem erro de SQL --
---     o código já trata isso como link_lead_failed, nunca finge
---     sucesso, mas a OPERAÇÃO REAL fica incompleta pra esses 2 perfis);
---   - completar "Recuperar vínculo" de diagnóstico (recoverDiagnosticLead),
---     pelo mesmo motivo.
+-- OPERACIONAL: propositalmente NÃO incluído aqui. `clients` dá acesso
+-- de equipe a admin/super_admin/operacional, mas client_files/
+-- client_projects/etc. (que usam is_admin_or_super()) NÃO incluem
+-- operacional -- há uma inconsistência real no sistema sobre se
+-- operacional deveria ter esse nível de acesso em tabelas satélite.
+-- Resolver isso exige confirmação humana da regra de negócio (a missão
+-- pediu explicitamente para não ampliar o acesso de operacional sem
+-- essa comprovação) -- fica registrado como pendência separada, não
+-- decidido por este agente.
 --
--- Correção proposta (NÃO aplicada): redefinir is_admin() pra reconhecer
--- também super_admin, e dar a operacional o mesmo acesso de equipe já
--- previsto nas próprias policies de `clients`.
+-- EVIDÊNCIA DO BUG (antes da correção, simulação real revertida):
+-- super_admin tentando UPDATE commercial_leads -- 0 linhas afetadas,
+-- RLS bloqueou silenciosamente (sem erro de SQL). Mesmo teste com
+-- is_admin_or_super() no lugar de is_admin() nessas policies resolveria
+-- (a função já existe e já teria permitido, confirmado por leitura do
+-- código-fonte da função -- reaplicar o teste completo exige a
+-- migration realmente aplicada, fora do escopo autorizado aqui).
 --
--- Rollback: reverter is_admin() pra definição anterior (só role='admin')
--- e DROP POLICY da nova policy de operacional abaixo.
+-- Rollback: recriar as 4 policies com `is_admin()` no lugar de
+-- `is_admin_or_super()` (texto original preservado nos comentários
+-- abaixo de cada CREATE POLICY).
 -- ============================================================
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'is_admin_or_super' AND pronamespace = 'public'::regnamespace) THEN
+    RAISE EXCEPTION 'public.is_admin_or_super() não existe -- pré-requisito confirmado presente em 2026-11-21, reconfirme antes de aplicar.';
+  END IF;
+END $$;
 
 BEGIN;
 
-CREATE OR REPLACE FUNCTION public.is_admin()
-RETURNS boolean
-LANGUAGE sql
-STABLE
-SECURITY DEFINER
-SET search_path = public
-AS $$
-  SELECT EXISTS (
-    SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role IN ('admin', 'super_admin')
-  );
-$$;
+-- Original: USING (is_admin()) WITH CHECK (is_admin())
+DROP POLICY IF EXISTS "admin_all_leads" ON public.commercial_leads;
+CREATE POLICY "admin_all_leads" ON public.commercial_leads FOR ALL TO authenticated
+  USING (public.is_admin_or_super())
+  WITH CHECK (public.is_admin_or_super());
 
-COMMENT ON FUNCTION public.is_admin() IS
-  'SQL 103 -- corrigido pra reconhecer super_admin além de admin (gap confirmado via simulação real de RLS: super_admin não conseguia escrever em commercial_leads, quebrando o pipeline comercial e a conversão lead->cliente pra esse perfil).';
+-- Original: USING (is_admin()) WITH CHECK (is_admin())
+DROP POLICY IF EXISTS "admin_all_meetings" ON public.commercial_meetings;
+CREATE POLICY "admin_all_meetings" ON public.commercial_meetings FOR ALL TO authenticated
+  USING (public.is_admin_or_super())
+  WITH CHECK (public.is_admin_or_super());
 
--- operacional precisa do mesmo acesso de equipe que já tem em `clients`
--- -- hoje não tem nenhuma policy própria em commercial_leads.
-DROP POLICY IF EXISTS "operacional_all_leads" ON public.commercial_leads;
-CREATE POLICY "operacional_all_leads" ON public.commercial_leads FOR ALL TO authenticated
-  USING (public.current_user_role() = 'operacional')
-  WITH CHECK (public.current_user_role() = 'operacional');
+-- Original: USING (is_admin()) WITH CHECK (is_admin())
+DROP POLICY IF EXISTS "admin_all_proposals" ON public.commercial_proposals;
+CREATE POLICY "admin_all_proposals" ON public.commercial_proposals FOR ALL TO authenticated
+  USING (public.is_admin_or_super())
+  WITH CHECK (public.is_admin_or_super());
+
+-- Original: USING (is_admin()) WITH CHECK (is_admin())
+DROP POLICY IF EXISTS "admin_all_activities" ON public.commercial_activities;
+CREATE POLICY "admin_all_activities" ON public.commercial_activities FOR ALL TO authenticated
+  USING (public.is_admin_or_super())
+  WITH CHECK (public.is_admin_or_super());
 
 COMMIT;

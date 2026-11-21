@@ -46,6 +46,42 @@ async function findCandidateClientIds(
 }
 
 /**
+ * PROMPT 04 -- tenta primeiro a versão ATÔMICA no banco
+ * (public.convert_lead_to_client, SQL 102, DB MIGRATION PENDING): uma
+ * única transação com advisory lock, fecha de verdade a janela de
+ * corrida que o fallback abaixo nunca consegue fechar sozinho
+ * (confirmado por teste: 2 chamadas simultâneas do fallback criam 2
+ * clientes). Enquanto a migration não for aplicada, a RPC não existe
+ * -- aí cai pro fallback em JS, nunca quebra a funcionalidade.
+ */
+async function tryAtomicRpc<T extends LeadForConversion>(
+  supabase: SupabaseClient,
+  lead: T,
+): Promise<ConvertLeadToClientResult<T> | null> {
+  const { data, error } = await supabase.rpc("convert_lead_to_client", { p_lead_id: lead.id });
+  if (error) {
+    const code = (error as { code?: string }).code;
+    const message = error.message ?? "";
+    const rpcMissing = code === "PGRST202" || code === "42883" || /does not exist|schema cache/i.test(message);
+    if (rpcMissing) return null; // migration 102 ainda não aplicada -- usa o fallback
+    if (/ambiguous_match/i.test(message)) {
+      return { ok: false, reason: "ambiguous_match", message: "Mais de um cliente já cadastrado corresponde a este lead. Revise manualmente qual é o vínculo correto -- a conversão não escolhe por conta própria." };
+    }
+    if (/no_identifier/i.test(message)) {
+      return { ok: false, reason: "no_identifier", message: "Lead sem e-mail e sem telefone -- não há identificador seguro pra buscar ou evitar duplicar um cliente." };
+    }
+    return { ok: false, reason: "link_lead_failed", message };
+  }
+  const row = Array.isArray(data) ? data[0] : data;
+  const clientId = row?.client_id as string | undefined;
+  const wasCreated = row?.was_created as boolean | undefined;
+  if (!clientId) return { ok: false, reason: "link_lead_failed", message: "A conversão atômica não retornou um cliente." };
+
+  const { data: updatedLead } = await supabase.from("commercial_leads").select("*").eq("id", lead.id).maybeSingle();
+  return { ok: true, clientId, clientCreated: wasCreated ?? false, lead: (updatedLead as unknown as T) ?? lead };
+}
+
+/**
  * Dedup real por e-mail/telefone ANTES de inserir -- nunca duplica um
  * cliente já cadastrado (seção 5/10/11 do brief). Idempotente: se o
  * lead já tem client_id, não cria nada novo e retorna o mesmo id.
@@ -56,12 +92,24 @@ async function findCandidateClientIds(
  * `ambiguous_match` com os ids candidatos, pra um humano revisar o
  * vínculo. Um nome parecido nunca é usado como critério (não é
  * verificado em lugar nenhum desta função -- só email/phone exatos).
+ *
+ * LIMITAÇÃO ADICIONAL CONFIRMADA (PROMPT 04): o dedup abaixo (e também
+ * o da RPC atômica) depende de o usuário chamador ter SELECT em
+ * `clients` -- isso é verdade pra admin/operacional/super_admin
+ * ("admin/equipe vê todos"), mas NÃO pra comercial/sdr/closer (fora
+ * dessa policy). Um usuário comercial puro nunca vê um cliente de
+ * outro dono, então o dedup sempre "não encontra nada" pra ele --
+ * risco real de duplicação nesse caso específico, não corrigido aqui
+ * (depende de decisão de negócio sobre dar esse SELECT a comercial).
  */
 export async function convertLeadToClient<T extends LeadForConversion>(
   supabase: SupabaseClient,
   lead: T,
   currentUserId: string | null,
 ): Promise<ConvertLeadToClientResult<T>> {
+  const atomic = await tryAtomicRpc(supabase, lead);
+  if (atomic) return atomic;
+
   if (lead.client_id) {
     return { ok: true, clientId: lead.client_id, clientCreated: false, lead };
   }
