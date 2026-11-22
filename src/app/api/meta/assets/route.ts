@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { resolveMetaApiVersion } from "@/lib/meta/graph-version";
 import { createServerSupabaseClient, createSupabaseAdminClient } from "@/lib/supabase/server";
 
 // GET /api/meta/assets
@@ -16,11 +17,16 @@ export async function GET() {
     return NextResponse.json({ ok: false, reason: "unauthenticated" }, { status: 401 });
   }
 
-  const apiVersion = process.env.META_API_VERSION?.trim() ?? "v21.0";
+  const apiVersion = resolveMetaApiVersion();
+  // Token só é lido pelo servidor (service role), sempre filtrado pelo
+  // usuário autenticado acima -- a coluna access_token não precisa ficar
+  // legível pela sessão do navegador (ver docs/supabase/106).
   const supabase = await createServerSupabaseClient();
+  let tokenDb: typeof supabase = supabase;
+  try { tokenDb = createSupabaseAdminClient() as unknown as typeof supabase; } catch { /* usa session */ }
 
   // Busca token ativo
-  const { data: conn, error: connError } = await supabase
+  const { data: conn, error: connError } = await tokenDb
     .from("meta_connections")
     .select("id, access_token")
     .eq("connected_by", userId)

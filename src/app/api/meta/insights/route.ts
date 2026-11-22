@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { resolveMetaApiVersion } from "@/lib/meta/graph-version";
 import {
   createServerSupabaseClient,
   createSupabaseAdminClient,
@@ -6,7 +7,7 @@ import {
 } from "@/lib/supabase/server";
 
 const ALLOWED_ROLES = new Set(["admin", "super_admin", "operacional", "agency", "team"]);
-const API_VERSION = process.env.META_API_VERSION?.trim() ?? "v21.0";
+const API_VERSION = resolveMetaApiVersion();
 const GRAPH_BASE = `https://graph.facebook.com/${API_VERSION}`;
 
 // ── Utilitários de data ────────────────────────────────────────────────────────

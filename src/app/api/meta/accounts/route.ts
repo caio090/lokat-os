@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { resolveMetaApiVersion } from "@/lib/meta/graph-version";
 import { createServerSupabaseClient, createSupabaseAdminClient, hasSupabaseServiceRoleKey } from "@/lib/supabase/server";
 
 // GET /api/meta/accounts?connection_id=<uuid>
@@ -11,7 +12,7 @@ import { createServerSupabaseClient, createSupabaseAdminClient, hasSupabaseServi
 //   - >1 conexões: retorna connection_selection_required
 //   - 0 conexões: retorna not_connected
 export async function GET(request: NextRequest) {
-  const apiVersion = process.env.META_API_VERSION?.trim() ?? "v21.0";
+  const apiVersion = resolveMetaApiVersion();
   const { searchParams } = new URL(request.url);
   const requestedConnectionId = searchParams.get("connection_id")?.trim() || null;
 

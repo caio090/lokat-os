@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
+import { resolveMetaApiVersion } from "@/lib/meta/graph-version";
+import { resolveOAuthScopes } from "@/lib/meta/token-lifecycle";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { getAppUrl, isProductionEnv, hasLocalhostMetaRedirect } from "@/lib/app-url";
 import { createOAuthState } from "@/lib/meta/state";
@@ -18,7 +20,7 @@ export async function GET(request: NextRequest) {
   const appUrl      = getAppUrl();
   const appId       = process.env.META_APP_ID?.trim();
   const redirectUri = process.env.META_REDIRECT_URI?.trim();
-  const apiVersion  = process.env.META_API_VERSION?.trim() ?? "v21.0";
+  const apiVersion  = resolveMetaApiVersion();
 
   if (!appId || !redirectUri) {
     return NextResponse.json(
@@ -48,13 +50,9 @@ export async function GET(request: NextRequest) {
 
   const state = createOAuthState({ uid: user.id, cid: clientId, rt: returnTo });
 
-  const scopes = [
-    "pages_show_list",
-    "pages_read_engagement",
-    "instagram_basic",
-    "instagram_manage_insights",
-    "business_management",
-  ].join(",");
+  // Base de leitura orgânica + extras opt-in (META_OAUTH_EXTRA_SCOPES, ex.:
+  // "ads_read") -- ver src/lib/meta/token-lifecycle.ts.
+  const scopes = resolveOAuthScopes().join(",");
 
   const authUrl = new URL(`https://www.facebook.com/${apiVersion}/dialog/oauth`);
   authUrl.searchParams.set("client_id",     appId);

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createSupabaseAdminClient, hasSupabaseServiceRoleKey } from "@/lib/supabase/server";
 import { getAppUrl } from "@/lib/app-url";
 import { verifyOAuthState } from "@/lib/meta/state";
+import { exchangeForLongLivedToken, inspectToken } from "@/lib/meta/token-lifecycle";
 
 // GET /api/meta/callback
 // Recebe o retorno OAuth do Meta, valida state assinado, troca code por token
@@ -90,6 +91,22 @@ export async function GET(request: NextRequest) {
     );
   }
 
+  // ── 3b. Token de longa duração + escopos/validade reais (não-crítico) ──
+  //    Sem isso a conexão ficava "active" com um token de ~1-2h e sem
+  //    registro de permissões (estado encontrado em produção em 2026-11-22).
+  if (!accessToken) {
+    return NextResponse.redirect(
+      `${appUrl}/admin/conexoes?meta_error=${encodeURIComponent("Resposta inesperada da Meta ao trocar o code.")}`
+    );
+  }
+  const longLived = await exchangeForLongLivedToken(accessToken, appId, appSecret);
+  accessToken = longLived.accessToken;
+  const inspection = await inspectToken(accessToken, appId, appSecret);
+  const tokenExpiresAt = inspection
+    ? inspection.expiresAt
+    : longLived.expiresAt;
+  const grantedScopes = inspection?.scopes.join(",") ?? null;
+
   // ── 4. Busca metadados da conta Meta (não-crítico) ────────────────────
   let metaUserId:   string | null = null;
   let metaUserName: string | null = null;
@@ -124,6 +141,8 @@ export async function GET(request: NextRequest) {
         meta_app_id:  appId,
         meta_user_id: metaUserId,
         access_token: accessToken, // armazenado server-side, nunca enviado ao front
+        token_expires_at: tokenExpiresAt ? tokenExpiresAt.toISOString() : null,
+        scopes:       grantedScopes,
         status:       "active",
         is_active:    true,
       })
