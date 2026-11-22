@@ -5,16 +5,16 @@ migrado) roda aqui como sistema operacional de trabalho da Lokat: estratégia,
 marketing, tráfego, conteúdo, comercial, operação e financeiro. Ele **não faz
 parte do site**: nada disso é importado pelo app nem vai para o deploy.
 
-Instalar ou atualizar (Mac ou Windows): `node scripts/sistema-lkt.mjs`.
+Instalar/atualizar (cada máquina, enquanto as pastas estiverem fora do Git): `node scripts/sistema-lkt.mjs`.
 Conferir sem escrever: `node scripts/sistema-lkt.mjs --check`.
 
 ## Onde fica cada coisa
 
 | O quê | Onde | No Git? |
 |---|---|---|
-| Skills LKT (166 aprovadas) | `.claude/skills/` | não, reinstalável pelo script |
-| Manifesto do instalador | `.lkt/` | não |
-| Memória, arquivos, catálogo, templates, workflows, workspaces | `sistema-lkt/` | não neste repo; é um clone do repositório **privado** `lokat-memoria-lkt` |
+| Skills LKT (168 aprovadas) | `.claude/skills/` | ainda não (repo público) |
+| Manifesto do instalador | `.lkt/` | ainda não (repo público) |
+| Memória, arquivos, catálogo, templates, workflows, workspaces | `sistema-lkt/` | ainda não (repo público; dados internos) |
 
 **Regra de caminhos:** quando uma skill LKT citar `_memoria/`, `arquivos/`,
 `catalogo/`, `knowledge/`, `schemas/`, `prompts/`, `templates/`,
@@ -23,9 +23,13 @@ Conferir sem escrever: `node scripts/sistema-lkt.mjs --check`.
 Os `templates/` citados pelas skills são os de `sistema-lkt/templates/`, não
 qualquer pasta de templates do app.
 
-Depois de alterar a memória ou um workspace, fazer commit e push **dentro
-de `sistema-lkt/`** (repo privado), para o Windows receber. Nunca mover
-esse conteúdo para o lokat-os.
+**Estas pastas só entram no Git quando o repositório for PRIVADO**: `sistema-lkt/` tem dados internos
+e de clientes, e parte das skills tem texto do MazyOS sem licença. Nunca
+torná-lo público sem antes remover essas pastas do histórico. Nada disso vai
+para o site: as três pastas estão na `.vercelignore`.
+
+Depois de alterar a memória ou um workspace, fazer commit e push normal do
+lokat-os para o outro computador receber.
 
 ## Google Drive
 
@@ -87,6 +91,23 @@ médio e conversão.
 Usar a identidade visual oficial do cliente; nunca recriar logo por
 inferência. A sigla LKT não aparece em peça entregue ao cliente.
 
+## Publicação no Instagram e Facebook (Meta)
+
+A skill `aprovar-post` publica direto só quando existe integração
+configurada e o usuário confirma naquela execução. A integração aqui é:
+
+- `node scripts/meta/configurar-token.mjs`: grava `META_PAGE_ID`,
+  `META_PAGE_ACCESS_TOKEN` e `META_IG_USER_ID` no `.env.local` a partir de um
+  token gerado no Graph API Explorer (instruções no topo do script).
+- `node scripts/meta/publicar.mjs <pasta> --dry-run` valida; com
+  `--instagram` e/ou `--facebook` publica `instagram/slide-NN.png` +
+  `legenda.md`. As imagens sobem para o bucket público `lkt-publicacoes` do
+  Supabase (a Meta exige URL pública).
+
+Sempre rodar `--dry-run` e mostrar o resumo antes de publicar. Publicar é
+irreversível: nunca repetir `--instagram` se o post já subiu. Estes scripts
+não fazem commit, push nem deploy, e não são usados pelo app.
+
 ## Arquivos recebidos
 
 Material novo entra em `sistema-lkt/arquivos/entrada/` e nunca é alterado.
@@ -96,8 +117,7 @@ para `sistema-lkt/arquivos/biblioteca/<categoria>/`; registrar em
 
 ## Não fazer
 
-- Não commitar `.claude/skills/`, `.lkt/` nem `sistema-lkt/` (repositório
-  público; parte das skills ainda tem texto do MazyOS sem licença, e a
-  memória tem dados internos).
+- Não tornar o repositório público (ver acima).
 - Não editar skills em `.claude/skills/` aqui: o instalador marca como
-  conflito. Mudança de skill é feita no skill-LKT e reinstalada.
+  conflito. Mudança de skill é feita no skill-LKT e reinstalada com o script.
+- Não importar nada de `sistema-lkt/` ou `.claude/` no código do app.
