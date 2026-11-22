@@ -26,6 +26,7 @@ const CHECK = process.argv.includes("--check");
 const REMOTE = "https://github.com/caio090/skill-LKT.git";
 const BRANCH = "feat/importar-skills-lkt-completas";
 const DESTINO = join(REPO, "sistema-lkt");
+const MEMORIA_REMOTE = process.env.LKT_MEMORIA_REMOTE || "https://github.com/caio090/lokat-memoria-lkt.git";
 const PASTAS = [
   "_memoria", "arquivos", "catalogo", "knowledge", "schemas", "prompts",
   "templates", "workflows", "workspaces", "exports",
@@ -122,6 +123,28 @@ function copiarSemSobrescrever(origem, destino, stats) {
   }
 }
 
+// Memória privada (repo GitHub privado). Clona se sistema-lkt/ não existir;
+// se já for um clone, puxa as atualizações antes de completar a estrutura.
+function sincronizarMemoria() {
+  if (CHECK) return;
+  if (!existsSync(DESTINO)) {
+    try {
+      run("git", ["clone", MEMORIA_REMOTE, DESTINO]);
+      console.log("Memória privada clonada em sistema-lkt/.");
+    } catch {
+      console.log("! Não consegui clonar a memória privada (sem acesso ou repo inexistente); criando estrutura em branco.");
+    }
+    return;
+  }
+  if (!existsSync(join(DESTINO, ".git"))) return;
+  try {
+    run("git", ["-C", DESTINO, "pull", "--ff-only", "-q"]);
+    console.log("Memória privada atualizada (git pull).");
+  } catch (e) {
+    console.log(`! git pull da memória falhou: ${(e.stderr || e.message).split("\n")[0]}`);
+  }
+}
+
 function montarEstrutura(lib) {
   const stats = { novos: 0, mantidos: 0 };
   if (!CHECK) mkdirSync(DESTINO, { recursive: true });
@@ -140,8 +163,14 @@ try {
   const lib = acharBiblioteca();
   if (!CHECK) atualizarBiblioteca(lib);
   instalarSkills(lib, py);
+  sincronizarMemoria();
   montarEstrutura(lib);
-  if (!CHECK) console.log("\nPronto. Recarregue o Claude Code (nova conversa) para carregar as skills.");
+  if (!CHECK) {
+    console.log("\nPronto. Recarregue o Claude Code (nova conversa) para carregar as skills.");
+    if (existsSync(join(DESTINO, ".git"))) {
+      console.log("Depois de mexer na memória: cd sistema-lkt && git add -A && git commit -m \"...\" && git push");
+    }
+  }
 } catch (e) {
   console.error(`Erro: ${e.stderr || e.message}`);
   process.exit(1);

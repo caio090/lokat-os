@@ -14,7 +14,7 @@ Conferir sem escrever: `node scripts/sistema-lkt.mjs --check`.
 |---|---|---|
 | Skills LKT (166 aprovadas) | `.claude/skills/` | não, reinstalável pelo script |
 | Manifesto do instalador | `.lkt/` | não |
-| Memória, arquivos, catálogo, templates, workflows, workspaces | `sistema-lkt/` | não, contém dados internos e de clientes |
+| Memória, arquivos, catálogo, templates, workflows, workspaces | `sistema-lkt/` | não neste repo; é um clone do repositório **privado** `lokat-memoria-lkt` |
 
 **Regra de caminhos:** quando uma skill LKT citar `_memoria/`, `arquivos/`,
 `catalogo/`, `knowledge/`, `schemas/`, `prompts/`, `templates/`,
@@ -22,6 +22,18 @@ Conferir sem escrever: `node scripts/sistema-lkt.mjs --check`.
 `sistema-lkt/` (ex.: `_memoria/empresa.md` → `sistema-lkt/_memoria/empresa.md`).
 Os `templates/` citados pelas skills são os de `sistema-lkt/templates/`, não
 qualquer pasta de templates do app.
+
+Depois de alterar a memória ou um workspace, fazer commit e push **dentro
+de `sistema-lkt/`** (repo privado), para o Windows receber. Nunca mover
+esse conteúdo para o lokat-os.
+
+## Google Drive
+
+O material da Lokat e dos clientes (reuniões, planejamentos, planilhas,
+fotos, vídeos, identidade de clientes) está no Google Drive da Lokat, lido
+pelo conector Google Drive do Claude. O mapa da pasta e as regras de uso
+estão em `sistema-lkt/arquivos/drive-lokat-rec.md`. Consultar o Drive antes
+de perguntar ao usuário algo que pode estar lá; não alterar nada no Drive.
 
 ## Contexto do negócio
 
