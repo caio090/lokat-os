@@ -61,3 +61,9 @@ dev-server.log
 skills-lock.json
 
 .vercel
+
+# Sistema LKT (instalado por scripts/sistema-lkt.mjs; ver docs/agentes/sistema-lkt.md)
+# Fora do Git: repositório público, memória com dados internos e skills de terceiros sem licença.
+/.claude/skills/
+/.lkt/
+/sistema-lkt/

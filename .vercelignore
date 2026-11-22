@@ -9,3 +9,8 @@ video-inicio/
 # Build e deps
 .next/
 node_modules/
+
+# Sistema LKT — ferramenta de trabalho local, nunca vai para o site
+.claude/
+.lkt/
+sistema-lkt/
