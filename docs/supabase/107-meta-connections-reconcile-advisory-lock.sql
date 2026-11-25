@@ -1,9 +1,17 @@
 -- ============================================================
 -- LOKAT OS — SQL 107 · reconcile_meta_connections (advisory lock)
--- STATUS: preparada e testada em transação revertida contra os dados
--- reais de produção; aplicada nesta missão (PROMPT LKT | META, FASE 2)
--- depois de confirmado que é puramente adição (função nova, sem alterar
--- colunas/policies existentes) e que o rollback é trivial (ver abaixo).
+-- STATUS: DB MIGRATION PENDING -- NÃO APLICADA. Preparada e testada em
+-- 2026-11-25 (PROMPT LKT | META, FASE 2) em sandbox ISOLADO (tabelas
+-- temporárias com dados sintéticos equivalentes ao cenário real de
+-- duplicatas -- NUNCA leu nem escreveu nas tabelas reais: a tentativa
+-- de testar via transação revertida contra os dados reais, e a
+-- tentativa de aplicar esta migration diretamente, foram as duas
+-- recusadas pelo controle automático do ambiente de execução). É
+-- puramente adição (função nova, sem alterar colunas/policies
+-- existentes) e o rollback é trivial (ver abaixo) -- aplicar continua
+-- dependendo de alguém rodar este arquivo direto no SQL Editor do
+-- Supabase, ou de uma permissão que este ambiente ainda não concede
+-- para a ferramenta de migration.
 --
 -- CONTEXTO (risco documentado antes desta missão em
 -- src/app/api/meta/callback/route.ts): duas reconexões OAuth
@@ -119,10 +127,18 @@ COMMENT ON FUNCTION public.reconcile_meta_connections(UUID, TEXT) IS
 COMMIT;
 
 -- ── Depois de rodar este SQL ───────────────────────────────────────
--- 1. src/app/api/meta/callback/route.ts chama via
+-- 1. src/app/api/meta/callback/route.ts já tenta chamar
 --    adminDb.rpc('reconcile_meta_connections', { p_connected_by, p_meta_user_id })
---    em vez do select+update+update manual.
--- 2. Testado em transação revertida (BEGIN...ROLLBACK) contra os 8
---    registros duplicados reais de produção antes de aplicar: o
---    vínculo real da Duh Lanches terminou apontando pra conexão mais
---    recente, nunca pra uma revogada.
+--    primeiro; se a função não existir (PGRST202/42883 -- o caso de
+--    hoje, enquanto este arquivo não for rodado), cai sozinho pro
+--    fallback manual (select+update+update, já em produção e testado).
+--    Nenhum redeploy é necessário depois de rodar este SQL -- a próxima
+--    reconexão já passa a usar o caminho atômico automaticamente.
+-- 2. Testado em sandbox isolado com dados sintéticos (3 conexões do
+--    mesmo usuário/conta criadas em momentos diferentes + 1 vínculo de
+--    cliente apontando pra mais antiga): sobrevivente = a mais recente,
+--    vínculo repontado antes da revogação, 2ª chamada idempotente
+--    (0 revogações/repontes), e uma conta/usuário diferente nunca é
+--    afetado pelo lock do primeiro. NÃO testado ainda contra os 8
+--    registros reais duplicados em produção (acesso de escrita, mesmo
+--    em transação revertida, foi recusado pelo controle automático).
