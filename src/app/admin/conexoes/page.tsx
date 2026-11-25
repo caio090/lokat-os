@@ -74,11 +74,21 @@ type AccountsResponse = {
   reason?: string;
   message?: string;
   connection_id?: string;
+  connection_count?: number;
   pages?: MetaPage[];
   instagram_accounts?: { id: string; name: string | null; username: string | null; picture_url: string | null }[];
   total_pages?: number;
   total_instagram?: number;
 } | null;
+
+type MetaConnectionOption = {
+  id: string;
+  display_name: string;
+  status: string;
+  created_at: string;
+  linked_clients_count: number;
+};
+type ConnectionsResponse = { ok: boolean; reason?: string; message?: string; connections?: MetaConnectionOption[] } | null;
 
 type AssetLink = { id: string; client_id: string; client_name: string | null };
 type AssetsResponse = {
@@ -458,7 +468,6 @@ function ConexoesContent() {
   const [insights,        setInsights]        = useState<InsightsResponse>(null);
   const [insightsLoading, setInsightsLoading] = useState(false);
   const [insightsTested,  setInsightsTested]  = useState(false);
-  const [showInsightsBox, setShowInsightsBox] = useState(false);
 
   const [showSetup, setShowSetup] = useState(false);
 
@@ -486,6 +495,32 @@ function ConexoesContent() {
 
   // Client selector: which provider is currently requesting a client selection
   const [clientSelectorFor, setClientSelectorFor] = useState<"meta" | "olaclick" | null>(null);
+
+  // Seleção de conexão Meta (quando há mais de uma ativa na plataforma)
+  const [metaConnections,        setMetaConnections]        = useState<MetaConnectionOption[]>([]);
+  const [metaConnectionsLoading, setMetaConnectionsLoading] = useState(false);
+  const [metaConnectionsTested,  setMetaConnectionsTested]  = useState(false);
+  const [selectedConnectionId,   setSelectedConnectionId]   = useState<string | null>(null);
+
+  // Teste real de insights por cliente (substitui o antigo /api/meta/insights
+  // sem client_id, que SEMPRE retornava missing_client_id e nunca refletia o
+  // estado real de nenhum ativo -- achado confirmado em 2026-11-23).
+  type ClientInsightsResult = {
+    client_id: string; client_name: string; ok: boolean; safeMessage: string;
+    assetType?: string; username?: string | null;
+  };
+  const [clientInsightsResults, setClientInsightsResults] = useState<ClientInsightsResult[] | null>(null);
+  const [clientInsightsLoading, setClientInsightsLoading] = useState(false);
+
+  // Teste real de contas de anúncio (via /api/meta/ad-accounts -- usa
+  // listAdAccounts, que já existia em marketing-api.ts mas nunca estava
+  // conectado a nenhuma rota; "indisponível nesta versão" era texto fixo).
+  type AdAccountsResponse = {
+    ok: boolean; reason?: string; message?: string; howToEnable?: string[];
+    accounts?: Array<{ accountId: string; name: string | null; currency: string | null }>;
+  } | null;
+  const [adAccounts,        setAdAccounts]        = useState<AdAccountsResponse>(null);
+  const [adAccountsLoading, setAdAccountsLoading] = useState(false);
 
   // Carrega conexões OlaClick do banco no mount
   const loadOlaConnections = useCallback(async () => {
@@ -541,12 +576,13 @@ function ConexoesContent() {
     finally { setInsightsLoading(false); }
   }, []);
 
-  const checkAccounts = useCallback(async () => {
+  const checkAccounts = useCallback(async (connectionId?: string) => {
     setAccountsLoading(true);
     try {
+      const qs = connectionId ? `?connection_id=${encodeURIComponent(connectionId)}` : "";
       const [acct, assetData, hubData] = await Promise.all([
-        fetch("/api/meta/accounts").then((r) => r.json()) as Promise<AccountsResponse>,
-        fetch("/api/meta/assets").then((r) => r.json()) as Promise<AssetsResponse>,
+        fetch(`/api/meta/accounts${qs}`).then((r) => r.json()) as Promise<AccountsResponse>,
+        fetch(`/api/meta/assets${qs}`).then((r) => r.json()) as Promise<AssetsResponse>,
         fetch("/api/meta/hub-assets").then((r) => r.json()) as Promise<HubAssetsResponse>,
       ]);
       setAccounts(acct);
@@ -557,19 +593,77 @@ function ConexoesContent() {
     finally { setAccountsLoading(false); }
   }, []);
 
+  // Busca a lista real de conexões Meta disponíveis (via /api/meta/connections,
+  // já existia no backend mas nunca era chamada pelo painel -- era por isso
+  // que "Há mais de uma conta Meta disponível" nunca tinha onde selecionar).
+  const checkMetaConnections = useCallback(async () => {
+    setMetaConnectionsLoading(true);
+    try {
+      const d = await fetch("/api/meta/connections").then((r) => r.json()) as ConnectionsResponse;
+      setMetaConnections(d?.connections ?? []);
+      setMetaConnectionsTested(true);
+    } catch { setMetaConnectionsTested(true); }
+    finally { setMetaConnectionsLoading(false); }
+  }, []);
+
+  async function selectMetaConnection(connectionId: string) {
+    setSelectedConnectionId(connectionId);
+    await checkAccounts(connectionId);
+  }
+
+  const checkAdAccounts = useCallback(async () => {
+    setAdAccountsLoading(true);
+    try {
+      const qs = selectedConnectionId ? `?connection_id=${encodeURIComponent(selectedConnectionId)}` : "";
+      const d = await fetch(`/api/meta/ad-accounts${qs}`).then((r) => r.json()) as AdAccountsResponse;
+      setAdAccounts(d);
+    } catch {
+      setAdAccounts({ ok: false, reason: "network_error", message: "Erro de rede ao consultar contas de anúncio." });
+    } finally {
+      setAdAccountsLoading(false);
+    }
+  }, [selectedConnectionId]);
+
+  // Teste real de insights, cliente por cliente (substitui o antigo teste
+  // global que sempre chamava /api/meta/insights sem client_id e caía em
+  // "missing_client_id", mostrando pro usuário uma mensagem genérica que
+  // nunca refletia o estado real de nenhum ativo).
+  const checkRealInsightsPerClient = useCallback(async () => {
+    setClientInsightsLoading(true);
+    try {
+      const candidates = olaClients.filter((c) => c.meta_status && c.meta_status !== "not_connected");
+      if (candidates.length === 0) {
+        setClientInsightsResults([]);
+        return;
+      }
+      const results = await Promise.all(
+        candidates.map(async (c): Promise<ClientInsightsResult> => {
+          try {
+            const d = await fetch(`/api/meta/insights/status?client_id=${encodeURIComponent(c.id)}`).then((r) => r.json()) as {
+              ok: boolean; safeMessage?: string; assetType?: string; username?: string | null;
+            };
+            return {
+              client_id: c.id, client_name: c.company_name,
+              ok: !!d.ok, safeMessage: d.safeMessage ?? (d.ok ? "Pronto para ler insights." : "Não foi possível confirmar."),
+              assetType: d.assetType, username: d.username,
+            };
+          } catch {
+            return { client_id: c.id, client_name: c.company_name, ok: false, safeMessage: "Erro de rede ao testar este cliente." };
+          }
+        }),
+      );
+      setClientInsightsResults(results);
+    } finally {
+      setClientInsightsLoading(false);
+    }
+  }, [olaClients]);
+
   // Carrega tudo ao montar, incluindo insights
   useEffect(() => {
     void checkAi();
     void checkMeta();
     void checkInsights();
   }, [checkAi, checkMeta, checkInsights]);
-
-  // Busca ativos da Meta após confirmar conexão
-  useEffect(() => {
-    if (insightsTested && insights?.ok) {
-      void checkAccounts();
-    }
-  }, [insightsTested, insights?.ok, checkAccounts]);
 
   // Deep-link: ?provider=meta&client=uuid → abre modal do cliente automaticamente (uma vez)
   useEffect(() => {
@@ -605,6 +699,46 @@ function ConexoesContent() {
   const envOk  = metaTested && !!metaStatus?.ok;
   const sqlOk  = metaTested && !metaStatus?.sqlPending;
   const conn   = insights?.connection;
+
+  // Busca ativos da Meta após confirmar conexão real (metaStatus.connected
+  // -- antes dependia de insights?.ok, que nunca era true porque o teste
+  // global de insights sempre batia em missing_client_id; achado confirmado
+  // em 2026-11-23, corrigido junto com o teste de insights por cliente).
+  useEffect(() => {
+    if (isConnected) {
+      void checkAccounts();
+    }
+  }, [isConnected, checkAccounts]);
+
+  // Quando a Meta sinaliza mais de uma conexão ativa, busca a lista real
+  // para o usuário escolher (antes não existia nenhuma forma de selecionar).
+  useEffect(() => {
+    if (!(accountsTested && accounts?.reason === "connection_selection_required" && !metaConnectionsTested)) return;
+    // setTimeout(0) em vez de chamar direto: evita o setState síncrono
+    // dentro do corpo do efeito (react-hooks/set-state-in-effect) sem
+    // desabilitar a regra -- a chamada só dispara depois que o React já
+    // terminou de commitar este efeito.
+    const timer = setTimeout(() => { void checkMetaConnections(); }, 0);
+    return () => clearTimeout(timer);
+  }, [accountsTested, accounts?.reason, metaConnectionsTested, checkMetaConnections]);
+
+  // Carrega o painel "o que funciona agora" (insights por cliente + contas
+  // de anúncio) sozinho, assim que a conexão está confirmada -- antes
+  // exigia 2 cliques extras ("Testar insights"/"Testar anúncios") que
+  // mostravam uma mensagem genérica (ver achado de 2026-11-23). Um único
+  // efeito pros dois -- não um pra cada -- pra não multiplicar o padrão
+  // já existente de fetch-on-mount deste arquivo.
+  useEffect(() => {
+    if (!isConnected) return;
+    // Mesmo motivo do efeito acima: setTimeout(0) tira a chamada do
+    // caminho síncrono do efeito, corrigindo de verdade (não suprimindo)
+    // o erro do react-hooks/set-state-in-effect.
+    const timer = setTimeout(() => {
+      if (olaClients.length > 0 && clientInsightsResults === null) void checkRealInsightsPerClient();
+      if (adAccounts === null) void checkAdAccounts();
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [isConnected, olaClients.length, clientInsightsResults, adAccounts, checkRealInsightsPerClient, checkAdAccounts]);
 
   const isDomainError = Boolean(
     flashErr &&
@@ -1068,7 +1202,47 @@ function ConexoesContent() {
                   </div>
                 )}
 
-                {accountsTested && !accounts?.ok && (
+                {accountsTested && accounts?.reason === "connection_selection_required" && (
+                  <div className="p-3.5 bg-amber-50 border border-amber-100 rounded-xl">
+                    <p className="text-xs font-semibold text-amber-800 mb-1">
+                      {accounts.connection_count ?? "Várias"} contas Meta conectadas nesta plataforma
+                    </p>
+                    <p className="text-[11px] text-amber-700 mb-3 leading-snug">
+                      Todas pertencem à mesma conta que fez o OAuth em momentos diferentes. Escolha qual conexão usar para listar os ativos — isso não desconecta as outras.
+                    </p>
+                    {metaConnectionsLoading && !metaConnectionsTested ? (
+                      <div className="flex items-center gap-2 text-xs text-amber-600 py-1">
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" /> Carregando conexões…
+                      </div>
+                    ) : (
+                      <div className="space-y-1.5">
+                        {metaConnections.map((c) => (
+                          <button
+                            key={c.id}
+                            onClick={() => void selectMetaConnection(c.id)}
+                            disabled={accountsLoading}
+                            className={`w-full text-left px-3 py-2 rounded-lg border text-xs transition-colors flex items-center justify-between gap-2 disabled:opacity-50 ${
+                              selectedConnectionId === c.id
+                                ? "bg-indigo-600 border-indigo-600 text-white"
+                                : "bg-white border-amber-200 text-amber-800 hover:border-indigo-300"
+                            }`}
+                          >
+                            <span className="truncate">
+                              {c.display_name} · {formatDate(c.created_at)}
+                              {c.linked_clients_count > 0 ? ` · ${c.linked_clients_count} cliente(s) vinculado(s)` : ""}
+                            </span>
+                            {selectedConnectionId === c.id && <CheckCircle2 className="w-3.5 h-3.5 flex-shrink-0" />}
+                          </button>
+                        ))}
+                        {metaConnectionsTested && metaConnections.length === 0 && (
+                          <p className="text-[11px] text-amber-600">Nenhuma conexão retornada — tente atualizar.</p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {accountsTested && !accounts?.ok && accounts?.reason !== "connection_selection_required" && (
                   <div className="p-3 bg-amber-50 border border-amber-100 rounded-xl text-xs text-amber-700">
                     {accounts?.reason === "graph_error"
                       ? <>Erro na Graph API: {accounts.message}</>
@@ -1120,6 +1294,7 @@ function ConexoesContent() {
                             </div>
                             {linkingKey === fbKey && (
                               <div className="mt-2 ml-8 space-y-1.5">
+                                <p className="text-[10px] text-amber-600 flex items-start gap-1"><AlertCircle className="w-3 h-3 flex-shrink-0 mt-0.5" />Se esta Página for da própria LOKAT (não de um cliente), não vincule aqui — este hub é só para ativos de clientes.</p>
                                 <select value={linkClientId} onChange={(e) => setLinkClientId(e.target.value)} className="w-full text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white outline-none focus:border-blue-400">
                                   <option value="">Selecione o cliente…</option>
                                   {olaClients.map((c) => <option key={c.id} value={c.id}>{c.company_name}</option>)}
@@ -1157,6 +1332,7 @@ function ConexoesContent() {
                                 </div>
                                 {linkingKey === igKey && (
                                   <div className="mt-2 space-y-1.5">
+                                    <p className="text-[10px] text-amber-600 flex items-start gap-1"><AlertCircle className="w-3 h-3 flex-shrink-0 mt-0.5" />Se este Instagram for da própria LOKAT (não de um cliente), não vincule aqui — este hub é só para ativos de clientes.</p>
                                     <select value={linkClientId} onChange={(e) => setLinkClientId(e.target.value)} className="w-full text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white outline-none focus:border-pink-400">
                                       <option value="">Selecione o cliente…</option>
                                       {olaClients.map((c) => <option key={c.id} value={c.id}>{c.company_name}</option>)}
@@ -1180,68 +1356,85 @@ function ConexoesContent() {
                 )}
               </div>
 
-              {/* ── O que a conexão habilita agora ── */}
-              <div className="p-3.5 bg-indigo-50 border border-indigo-100 rounded-xl mb-4">
-                <p className="text-[10px] font-bold text-indigo-500 uppercase tracking-widest mb-2">O que esta conexao habilita</p>
-                <div className="space-y-1.5 text-xs">
-                  <div className="flex items-start gap-2 text-indigo-800">
-                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 flex-shrink-0 mt-0.5" />
-                    <span>Leitura de métricas do Instagram Business (alcance, impressões, engajamento)</span>
-                  </div>
-                  <div className="flex items-start gap-2 text-indigo-800">
-                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 flex-shrink-0 mt-0.5" />
-                    <span>Listagem de Páginas Facebook e contas Instagram vinculadas</span>
-                  </div>
-                  <div className="flex items-start gap-2 text-indigo-800">
-                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 flex-shrink-0 mt-0.5" />
-                    <span>Vinculação de ativos Meta a clientes da agência</span>
-                  </div>
-                  <div className="flex items-start gap-2 text-gray-400">
-                    <Clock className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
-                    <span>Publicação automática · em breve (requer Meta App Review)</span>
-                  </div>
-                  <div className="flex items-start gap-2 text-gray-400">
-                    <Clock className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
-                    <span>Gestão de anúncios · em breve</span>
-                  </div>
+              {/* ── O que funciona agora, de verdade (substitui a antiga lista
+                  estática "o que esta conexão habilita" + os dois painéis que
+                  só apareciam depois de clicar em "Testar X" -- carrega sozinho
+                  assim que a conexão é confirmada, sem exigir clique nenhum) ── */}
+              <div className="p-3.5 bg-gray-50 border border-gray-100 rounded-xl mb-4">
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">O que funciona agora</p>
+                  <button
+                    onClick={() => { void checkRealInsightsPerClient(); void checkAdAccounts(); }}
+                    disabled={clientInsightsLoading || adAccountsLoading}
+                    className="inline-flex items-center gap-1 text-[10px] text-gray-400 hover:text-gray-600 transition-colors disabled:opacity-50"
+                  >
+                    {(clientInsightsLoading || adAccountsLoading) ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
+                    Atualizar
+                  </button>
                 </div>
-              </div>
 
-              {/* Botão insights expandível */}
-              {showInsightsBox && (
-                <div className="p-3.5 bg-gray-50 border border-gray-100 rounded-xl mb-4">
-                  <p className="text-xs font-semibold text-gray-700 mb-2">Resultado de /api/meta/insights</p>
-                  {insightReason === "ready" && insights?.metrics_available && insights.metrics_available.length > 0 ? (
-                    <>
-                      <p className="text-xs text-emerald-700 font-medium mb-1">Metricas disponiveis:</p>
-                      <div className="flex flex-wrap gap-1">
-                        {insights.metrics_available.map((m) => (
-                          <span key={m} className="text-[11px] bg-emerald-50 border border-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full">{m}</span>
-                        ))}
+                {/* Insights por cliente */}
+                <p className="text-xs font-semibold text-gray-700 mb-1.5">Leitura de métricas (Instagram/Facebook)</p>
+                {clientInsightsLoading && clientInsightsResults === null ? (
+                  <div className="flex items-center gap-2 text-xs text-gray-400 py-1 mb-3">
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" /> Checando cada cliente com ativo vinculado…
+                  </div>
+                ) : clientInsightsResults === null || clientInsightsResults.length === 0 ? (
+                  <p className="text-xs text-gray-500 mb-3">Nenhum cliente tem Página ou Instagram vinculado ainda — vincule em &quot;Status Meta por cliente&quot; acima.</p>
+                ) : (
+                  <div className="space-y-1.5 mb-3">
+                    {clientInsightsResults.map((r) => (
+                      <div key={r.client_id} className={`flex items-start gap-2 text-xs p-2 rounded-lg border ${r.ok ? "bg-emerald-50 border-emerald-100 text-emerald-800" : "bg-red-50 border-red-100 text-red-700"}`}>
+                        {r.ok ? <CheckCircle2 className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" /> : <XCircle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />}
+                        <div>
+                          <p className="font-semibold">{r.client_name}{r.username ? ` (@${r.username})` : ""}</p>
+                          <p className="text-[11px] opacity-90">{r.safeMessage}</p>
+                        </div>
                       </div>
-                      <p className="text-[11px] text-gray-400 mt-2">Leitura real via Graph API em implementacao.</p>
-                    </>
+                    ))}
+                  </div>
+                )}
+
+                {/* Contas de anúncio */}
+                <p className="text-xs font-semibold text-gray-700 mb-1.5">Contas de anúncio</p>
+                {adAccountsLoading && adAccounts === null ? (
+                  <div className="flex items-center gap-2 text-xs text-gray-400 py-1">
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" /> Consultando Graph API…
+                  </div>
+                ) : adAccounts?.ok ? (
+                  adAccounts.accounts && adAccounts.accounts.length > 0 ? (
+                    <div className="space-y-1">
+                      {adAccounts.accounts.map((a) => (
+                        <div key={a.accountId} className="text-xs text-gray-700 flex items-center justify-between bg-white border border-gray-100 rounded-lg px-2.5 py-1.5">
+                          <span>{a.name ?? a.accountId} <span className="text-gray-400">· {a.currency ?? "—"}</span></span>
+                          <span className="text-[10px] text-gray-400">act_{a.accountId}</span>
+                        </div>
+                      ))}
+                    </div>
                   ) : (
-                    <p className="text-xs text-gray-500">{insights?.message ?? "Conexao ativa, mas ainda nao ha leitura de dados configurada para este ativo."}</p>
-                  )}
-                </div>
-              )}
+                    <p className="text-xs text-gray-500">Permissão concedida, mas nenhuma conta de anúncio encontrada para esta conexão.</p>
+                  )
+                ) : adAccounts?.reason === "ads_scope_not_granted" ? (
+                  <div>
+                    <p className="text-xs text-amber-700 font-medium mb-2">Ainda não disponível — falta uma permissão extra.</p>
+                    <ol className="text-[11px] text-gray-600 space-y-1 list-decimal list-inside">
+                      {(adAccounts.howToEnable ?? []).map((step, i) => <li key={i}>{step.replace(/^\d+\.\s*/, "")}</li>)}
+                    </ol>
+                  </div>
+                ) : (
+                  <p className="text-xs text-gray-500">{adAccounts?.message ?? "Verificando…"}</p>
+                )}
+              </div>
 
               {/* Botões pós-conexão */}
               <div className="flex flex-wrap gap-2 mb-4">
                 <button
-                  onClick={async () => { await checkInsights(); setShowInsightsBox(true); }}
-                  disabled={insightsLoading}
+                  onClick={async () => { await checkMeta(); }}
+                  disabled={metaLoading}
                   className="inline-flex items-center gap-1.5 text-xs font-medium text-gray-600 bg-gray-100 hover:bg-gray-200 px-3 py-1.5 rounded-xl transition-colors disabled:opacity-50"
                 >
-                  {insightsLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+                  {metaLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
                   Testar status
-                </button>
-                <button
-                  onClick={async () => { setShowInsightsBox((v) => !v); if (!insightsTested) await checkInsights(); }}
-                  className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-100 px-3 py-1.5 rounded-xl transition-colors"
-                >
-                  <BarChart3 className="w-3.5 h-3.5" /> {showInsightsBox ? "Fechar insights" : "Testar insights"}
                 </button>
                 <a
                   href="/api/meta/connect"

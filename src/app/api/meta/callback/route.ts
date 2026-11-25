@@ -171,6 +171,84 @@ export async function GET(request: NextRequest) {
     }
 
     newConnectionId = inserted?.id ?? null;
+
+    // Toda reconexão deste usuário criava uma linha nova sem nunca
+    // desativar a anterior (histórico nunca é apagado), e isso se
+    // acumulou: confirmado em produção em 2026-11-23, 8 linhas "active"
+    // simultâneas para a mesma conta Meta, o que faz /api/meta/accounts
+    // sempre cair em "connection_selection_required" sem nenhuma forma
+    // de escolher. client_meta_assets.meta_connection_id aponta pra uma
+    // linha ESPECÍFICA (ex.: Duh Lanches -> conexão de 2026-06-26);
+    // revogar essa linha sem repontar primeiro quebraria a leitura de
+    // insights dela, mesmo sendo a MESMA conta Meta -- achado confirmado
+    // ao reauditar este fluxo em 2026-11-24.
+    //
+    // metaUserId ausente (fetch /me falhou, caminho não-crítico) significa
+    // que não há como comprovar "é a mesma conta Meta" -- nesse caso não
+    // toca em nada.
+    if (newConnectionId && metaUserId) {
+      try {
+        // reconcile_meta_connections (SQL 107) faz a reconciliação toda
+        // (escolher sobrevivente + repontar vínculos + revogar antigas)
+        // em UMA transação sob pg_advisory_xact_lock, fechando de verdade
+        // a corrida entre duas reconexões verdadeiramente simultâneas do
+        // mesmo usuário -- a versão anterior fazia 3 chamadas HTTP
+        // separadas, sem nenhuma transação cobrindo as duas. Testado em
+        // sandbox isolado (tabelas temporárias, nunca nas reais) em
+        // 2026-11-25: sobrevivente determinístico (mais recente),
+        // idempotente, e duas contas/usuários diferentes nunca se
+        // bloqueiam entre si.
+        const { error: rpcError } = await adminDb.rpc("reconcile_meta_connections", {
+          p_connected_by: userId,
+          p_meta_user_id: metaUserId,
+        });
+
+        // PGRST202 / 42883: a migration 107 ainda não foi rodada neste
+        // ambiente (pendência manual -- aplicar migrations está fora do
+        // que esta sessão consegue fazer direto no banco). Nesse caso,
+        // cai pro caminho anterior (3 chamadas separadas): não é à prova
+        // de concorrência simultânea, mas é o mesmo comportamento já
+        // testado e em uso, nunca deixa a reconexão sequencial quebrada.
+        const fnMissing =
+          rpcError && (rpcError.code === "PGRST202" || rpcError.code === "42883");
+
+        if (fnMissing) {
+          const { data: oldActive } = await adminDb
+            .from("meta_connections")
+            .select("id")
+            .eq("connected_by", userId)
+            .eq("status", "active")
+            .eq("meta_user_id", metaUserId)
+            .neq("id", newConnectionId);
+
+          const oldIds = (oldActive ?? []).map((r: { id: string }) => r.id);
+
+          if (oldIds.length > 0) {
+            await adminDb
+              .from("client_meta_assets")
+              .update({ meta_connection_id: newConnectionId })
+              .in("meta_connection_id", oldIds);
+          }
+
+          await adminDb
+            .from("meta_connections")
+            .update({ status: "revoked", is_active: false })
+            .eq("connected_by", userId)
+            .eq("status", "active")
+            .eq("meta_user_id", metaUserId)
+            .neq("id", newConnectionId);
+        } else if (rpcError) {
+          console.error("[meta/callback] reconcile_meta_connections falhou", {
+            code: rpcError.code,
+            message: rpcError.message,
+          });
+        }
+      } catch {
+        // Não-crítico: a conexão nova já foi salva com sucesso. Falhar em
+        // rebaixar/repontar as antigas nunca deve virar um erro pro
+        // usuário -- na próxima reconexão, a limpeza é tentada de novo.
+      }
+    }
   } catch {
     return NextResponse.redirect(
       `${appUrl}/admin/conexoes?meta_error=${encodeURIComponent("Erro inesperado ao salvar a conexão Meta.")}`

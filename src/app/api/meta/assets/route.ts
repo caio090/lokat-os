@@ -1,49 +1,111 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { resolveMetaApiVersion } from "@/lib/meta/graph-version";
 import { createServerSupabaseClient, createSupabaseAdminClient } from "@/lib/supabase/server";
 
-// GET /api/meta/assets
+const BROAD_ACCESS_ROLES = new Set(["admin", "super_admin"]);
+
+// GET /api/meta/assets?connection_id=<uuid>
 // Lista ativos Meta da conta conectada + vínculo com clientes, se existir.
 // Nunca expõe access_token.
-export async function GET() {
+//
+// Mesma regra de resolução de conexão de /api/meta/accounts (consistência
+// -- antes esta rota ignorava connection_id e sempre pegava "a conexão
+// mais recente do usuário", silenciosamente, mesmo quando havia mais de
+// uma conexão ativa na plataforma; confirmado em produção em 2026-11-23:
+// 8 conexões ativas simultâneas tornavam esse "mais recente" uma escolha
+// arbitrária que o usuário não controlava nem via).
+export async function GET(request: NextRequest) {
+  const { searchParams } = new URL(request.url);
+  const requestedConnectionId = searchParams.get("connection_id")?.trim() || null;
+
   let userId: string | null = null;
+  let userRole: string | null = null;
+  const supabase = await createServerSupabaseClient();
   try {
-    const supabase = await createServerSupabaseClient();
     const { data: { user } } = await supabase.auth.getUser();
     userId = user?.id ?? null;
+    if (userId) {
+      const { data: profile } = await supabase
+        .from("profiles").select("role").eq("id", userId).maybeSingle();
+      userRole = profile?.role ?? null;
+    }
   } catch { userId = null; }
 
   if (!userId) {
     return NextResponse.json({ ok: false, reason: "unauthenticated" }, { status: 401 });
   }
 
+  const isBroadAccess = !!userRole && BROAD_ACCESS_ROLES.has(userRole);
   const apiVersion = resolveMetaApiVersion();
-  // Token só é lido pelo servidor (service role), sempre filtrado pelo
-  // usuário autenticado acima -- a coluna access_token não precisa ficar
+
+  // Token só é lido pelo servidor (service role), sempre filtrado pela
+  // autorização checada acima -- a coluna access_token não precisa ficar
   // legível pela sessão do navegador (ver docs/supabase/106).
-  const supabase = await createServerSupabaseClient();
   let tokenDb: typeof supabase = supabase;
   try { tokenDb = createSupabaseAdminClient() as unknown as typeof supabase; } catch { /* usa session */ }
 
-  // Busca token ativo
-  const { data: conn, error: connError } = await tokenDb
-    .from("meta_connections")
-    .select("id, access_token")
-    .eq("connected_by", userId)
-    .eq("status", "active")
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+  let accessToken: string | null = null;
+  let connectionId: string | null = null;
 
-  if (connError?.code === "42P01") {
-    return NextResponse.json({ ok: false, reason: "sql_pending", message: "Rode o SQL 35." });
-  }
-  if (!conn) {
-    return NextResponse.json({ ok: false, reason: "not_connected", message: "Nenhuma conexão Meta ativa." });
-  }
+  if (requestedConnectionId) {
+    let connQuery = tokenDb
+      .from("meta_connections")
+      .select("id, access_token")
+      .eq("id", requestedConnectionId)
+      .eq("status", "active")
+      .maybeSingle();
+    if (!isBroadAccess) {
+      connQuery = tokenDb
+        .from("meta_connections")
+        .select("id, access_token")
+        .eq("id", requestedConnectionId)
+        .eq("connected_by", userId)
+        .eq("status", "active")
+        .maybeSingle();
+    }
+    const { data: conn, error } = await connQuery;
+    if (error?.code === "42P01") {
+      return NextResponse.json({ ok: false, reason: "sql_pending", message: "Rode o SQL 35." });
+    }
+    if (!conn) {
+      return NextResponse.json({
+        ok: false, reason: "connection_not_found",
+        message: "Conexão não encontrada ou sem permissão de acesso.",
+      }, { status: 404 });
+    }
+    accessToken = conn.access_token as string;
+    connectionId = conn.id as string;
+  } else {
+    let listQuery = tokenDb
+      .from("meta_connections")
+      .select("id, access_token")
+      .eq("status", "active")
+      .order("created_at", { ascending: false });
+    if (!isBroadAccess) {
+      listQuery = listQuery.eq("connected_by", userId);
+    }
+    const { data: conns, error: connError } = await listQuery;
 
-  const accessToken = conn.access_token as string;
-  const connectionId = conn.id as string;
+    if (connError?.code === "42P01") {
+      return NextResponse.json({ ok: false, reason: "sql_pending", message: "Rode o SQL 35." });
+    }
+
+    const list = (conns ?? []) as Array<{ id: string; access_token: string }>;
+
+    if (list.length === 0) {
+      return NextResponse.json({ ok: false, reason: "not_connected", message: "Nenhuma conexão Meta ativa." });
+    }
+    if (list.length > 1) {
+      return NextResponse.json({
+        ok: false, reason: "connection_selection_required",
+        message: "Há mais de uma conta Meta disponível. Selecione a conexão desejada.",
+        connection_count: list.length,
+      });
+    }
+
+    accessToken = list[0].access_token;
+    connectionId = list[0].id;
+  }
 
   // Busca páginas + Instagram via Graph API
   let pages: Array<{

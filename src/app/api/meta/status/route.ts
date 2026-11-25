@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
-import { createServerSupabaseClient, isSupabaseConfigured } from "@/lib/supabase/server";
+import { createServerSupabaseClient, createSupabaseAdminClient, hasSupabaseServiceRoleKey, isSupabaseConfigured } from "@/lib/supabase/server";
 import { hasLocalhostMetaRedirect, isProductionEnv } from "@/lib/app-url";
+
+const BROAD_ACCESS_ROLES = new Set(["admin", "super_admin"]);
 
 // GET /api/meta/status
 // Retorna estado completo da integração Meta sem expor nenhum valor sensível.
@@ -32,13 +34,38 @@ export async function GET() {
       const { data: { user } } = await supabase.auth.getUser();
 
       if (user) {
-        const { data, error } = await supabase
+        // admin/super_admin: "conectado" considera QUALQUER conexão ativa
+        // na plataforma, não só a do usuário que está checando -- mesma
+        // regra já usada em /api/meta/accounts. Sem isso, um admin
+        // diferente de quem fez o OAuth via a Central de Conexões como
+        // "Aguardando conexão" mesmo com uma conexão real já ativa.
+        const { data: profile } = await supabase
+          .from("profiles").select("role").eq("id", user.id).maybeSingle();
+        const isBroadAccess = !!profile?.role && BROAD_ACCESS_ROLES.has(profile.role);
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        let db: any = supabase;
+        if (isBroadAccess && hasSupabaseServiceRoleKey()) {
+          try { db = createSupabaseAdminClient(); } catch { /* usa session */ }
+        }
+
+        let connQuery = db
           .from("meta_connections")
           .select("id")
-          .eq("connected_by", user.id)
           .eq("status", "active")
           .limit(1)
           .maybeSingle();
+        if (!isBroadAccess) {
+          connQuery = db
+            .from("meta_connections")
+            .select("id")
+            .eq("connected_by", user.id)
+            .eq("status", "active")
+            .limit(1)
+            .maybeSingle();
+        }
+
+        const { data, error } = await connQuery;
 
         if (error?.code === "42P01") {
           // relation does not exist — SQL 35 não foi rodado
