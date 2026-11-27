@@ -497,10 +497,16 @@ function ConexoesContent() {
   const [clientSelectorFor, setClientSelectorFor] = useState<"meta" | "olaclick" | null>(null);
 
   // Seleção de conexão Meta (quando há mais de uma ativa na plataforma)
-  const [metaConnections,        setMetaConnections]        = useState<MetaConnectionOption[]>([]);
+  // Guarda a resposta inteira (não só connections[]) para distinguir "lista
+  // vazia de verdade" de falha de permissão/banco/rede -- antes, qualquer
+  // resposta sem d.connections (inclusive ok:false) virava [] e a tela
+  // sempre dizia "Nenhuma conexão retornada", escondendo a causa real
+  // (achado do PROMPT LKT 14, confirmado lendo /api/meta/connections/route.ts).
+  const [metaConnectionsResult,  setMetaConnectionsResult]  = useState<ConnectionsResponse>(null);
   const [metaConnectionsLoading, setMetaConnectionsLoading] = useState(false);
   const [metaConnectionsTested,  setMetaConnectionsTested]  = useState(false);
   const [selectedConnectionId,   setSelectedConnectionId]   = useState<string | null>(null);
+  const metaConnections = metaConnectionsResult?.connections ?? [];
 
   // Teste real de insights por cliente (substitui o antigo /api/meta/insights
   // sem client_id, que SEMPRE retornava missing_client_id e nunca refletia o
@@ -600,10 +606,12 @@ function ConexoesContent() {
     setMetaConnectionsLoading(true);
     try {
       const d = await fetch("/api/meta/connections").then((r) => r.json()) as ConnectionsResponse;
-      setMetaConnections(d?.connections ?? []);
+      setMetaConnectionsResult(d);
       setMetaConnectionsTested(true);
-    } catch { setMetaConnectionsTested(true); }
-    finally { setMetaConnectionsLoading(false); }
+    } catch {
+      setMetaConnectionsResult({ ok: false, reason: "network_error", message: "Erro de rede ao consultar conexões Meta." });
+      setMetaConnectionsTested(true);
+    } finally { setMetaConnectionsLoading(false); }
   }, []);
 
   async function selectMetaConnection(connectionId: string) {
@@ -1214,6 +1222,30 @@ function ConexoesContent() {
                       <div className="flex items-center gap-2 text-xs text-amber-600 py-1">
                         <Loader2 className="w-3.5 h-3.5 animate-spin" /> Carregando conexões…
                       </div>
+                    ) : metaConnectionsTested && !metaConnectionsResult?.ok ? (
+                      // Falha real (permissão/banco/rede) — nunca mostrar como lista vazia.
+                      <div className="p-2.5 bg-red-50 border border-red-100 rounded-lg">
+                        <p className="text-[11px] text-red-700 mb-2">
+                          {metaConnectionsResult?.reason === "unauthenticated"
+                            ? "Sessão expirada. Atualize a página e faça login novamente."
+                            : metaConnectionsResult?.reason === "forbidden"
+                              ? "Seu perfil não tem permissão para listar conexões Meta."
+                              : metaConnectionsResult?.reason === "sql_pending"
+                                ? (metaConnectionsResult?.message ?? "Tabela de conexões Meta ainda não existe no banco.")
+                                : metaConnectionsResult?.reason === "db_error"
+                                  ? "Erro ao consultar o banco de dados ao listar conexões."
+                                  : metaConnectionsResult?.reason === "network_error"
+                                    ? "Erro de rede ao consultar conexões Meta."
+                                    : metaConnectionsResult?.message ?? "Não foi possível carregar as conexões Meta."}
+                        </p>
+                        <button
+                          onClick={() => void checkMetaConnections()}
+                          disabled={metaConnectionsLoading}
+                          className="text-[11px] font-medium text-red-700 hover:text-red-900 underline disabled:opacity-50"
+                        >
+                          Tentar novamente
+                        </button>
+                      </div>
                     ) : (
                       <div className="space-y-1.5">
                         {metaConnections.map((c) => (
@@ -1235,7 +1267,7 @@ function ConexoesContent() {
                           </button>
                         ))}
                         {metaConnectionsTested && metaConnections.length === 0 && (
-                          <p className="text-[11px] text-amber-600">Nenhuma conexão retornada — tente atualizar.</p>
+                          <p className="text-[11px] text-amber-600">Nenhuma conexão Meta ativa encontrada. Reconecte em &quot;Conectar Meta&quot;.</p>
                         )}
                       </div>
                     )}
