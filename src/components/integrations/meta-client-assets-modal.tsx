@@ -23,7 +23,13 @@ interface AvailablePage {
 interface CurrentAssets {
   facebookPage:      { asset_record_id: string; id: string; name: string | null } | null;
   instagramBusiness: { asset_record_id: string; id: string; username: string | null } | null;
-  adAccount:         null;
+  adAccount:         { asset_record_id: string; id: string; name: string | null } | null;
+}
+
+interface AvailableAdAccount {
+  accountId: string;
+  name:      string | null;
+  currency:  string | null;
 }
 
 interface Connection {
@@ -62,6 +68,15 @@ export function MetaClientAssetsModal({
   const [selectedPageId, setSelectedPageId] = useState<string | null>(null);
   const [error,          setError]          = useState("");
   const [unlinking,      setUnlinking]      = useState(false);
+
+  // Conta de anúncio (PROMPT LKT 16) -- vínculo independente do fluxo de
+  // Página/Instagram: client_meta_assets e admin_link_meta_asset já
+  // aceitavam asset_type='ad_account' (SQL 37/60); só não havia UI.
+  const [adAccounts,            setAdAccounts]            = useState<AvailableAdAccount[]>([]);
+  const [loadingAdAccounts,     setLoadingAdAccounts]     = useState(false);
+  const [adAccountsError,       setAdAccountsError]       = useState("");
+  const [selectedAdAccountId,   setSelectedAdAccountId]   = useState<string | null>(null);
+  const [adAccountSaving,       setAdAccountSaving]       = useState(false);
 
   const selectedPage = pages.find((p) => p.id === selectedPageId) ?? null;
 
@@ -115,6 +130,28 @@ export function MetaClientAssetsModal({
     return () => { active = false; };
   }, [clientId, preferredConnectionId]);
 
+  // ── Carrega contas de anúncio da mesma conexão (independente de páginas) ──
+  const loadAdAccountsForConnection = useCallback(async (connId: string) => {
+    setLoadingAdAccounts(true);
+    setAdAccountsError("");
+    setAdAccounts([]);
+    try {
+      const r = await fetch(`/api/meta/ad-accounts?connection_id=${connId}`);
+      const d = await r.json() as {
+        ok: boolean; accounts?: AvailableAdAccount[]; reason?: string; message?: string;
+      };
+      if (!d.ok) {
+        setAdAccountsError(d.message ?? "Conta de anúncio indisponível para esta conexão.");
+        return;
+      }
+      setAdAccounts(d.accounts ?? []);
+    } catch {
+      setAdAccountsError("Erro de rede ao consultar contas de anúncio.");
+    } finally {
+      setLoadingAdAccounts(false);
+    }
+  }, []);
+
   // ── Carrega páginas de uma conexão específica ─────────────────────────
   const loadPagesForConnection = useCallback(async (connId: string) => {
     setLoadingPages(true);
@@ -135,13 +172,48 @@ export function MetaClientAssetsModal({
       setPages(d.pages ?? []);
       setConnectionId(d.connection_id ?? null);
       setStep("select");
+      if (d.connection_id) void loadAdAccountsForConnection(d.connection_id);
     } catch {
       setError("Erro de rede ao carregar páginas.");
       setStep("pick_connection");
     } finally {
       setLoadingPages(false);
     }
-  }, []);
+  }, [loadAdAccountsForConnection]);
+
+  // ── Vincular conta de anúncio (independente do salvar de Página/Instagram) ──
+  async function linkAdAccount() {
+    if (!selectedAdAccountId) return;
+    const account = adAccounts.find((a) => a.accountId === selectedAdAccountId);
+    setAdAccountSaving(true);
+    setError("");
+    try {
+      const r = await fetch("/api/meta/assets/link", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          client_id:          clientId,
+          asset_type:         "ad_account",
+          asset_id:           selectedAdAccountId,
+          asset_name:         account?.name ?? undefined,
+          meta_connection_id: connectionId ?? undefined,
+          is_primary:         true,
+        }),
+      });
+      const d = await r.json() as { ok: boolean; message?: string };
+      if (!d.ok) {
+        setError(d.message ?? "Erro ao vincular conta de anúncio.");
+        return;
+      }
+      setSelectedAdAccountId(null);
+      const ca = await fetch(`/api/meta/client-assets?client_id=${clientId}`).then((r2) => r2.json()) as { ok: boolean; assets?: CurrentAssets };
+      if (ca.ok && ca.assets) setCurrentAssets(ca.assets);
+    } catch {
+      setError("Erro de rede ao vincular conta de anúncio.");
+    } finally {
+      setAdAccountSaving(false);
+    }
+  }
 
   // Dispara quando step muda para loading_pages
   useEffect(() => {
@@ -324,7 +396,7 @@ export function MetaClientAssetsModal({
           {!loadingInit && step === "choose_mode" && (
             <>
               {/* Ativos atuais */}
-              {(currentAssets?.facebookPage || currentAssets?.instagramBusiness) && (
+              {(currentAssets?.facebookPage || currentAssets?.instagramBusiness || currentAssets?.adAccount) && (
                 <div className="mb-4 p-3 bg-emerald-50 border border-emerald-100 rounded-xl">
                   <p className="text-[10px] font-bold text-emerald-700 uppercase tracking-wide mb-2">Ativos atuais de {clientName}</p>
                   <div className="space-y-1.5">
@@ -352,6 +424,22 @@ export function MetaClientAssetsModal({
                         </div>
                         <button
                           onClick={() => void handleUnlink(currentAssets.instagramBusiness!.asset_record_id)}
+                          disabled={unlinking}
+                          className="text-[10px] text-red-400 hover:text-red-600 flex items-center gap-1 transition-colors"
+                        >
+                          {unlinking ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
+                          Desvincular
+                        </button>
+                      </div>
+                    )}
+                    {currentAssets.adAccount && (
+                      <div className="flex items-center justify-between text-xs">
+                        <div className="flex items-center gap-2">
+                          <Link2 className="w-3.5 h-3.5 text-indigo-500" />
+                          <span className="text-gray-700 font-medium">{currentAssets.adAccount.name ?? currentAssets.adAccount.id}</span>
+                        </div>
+                        <button
+                          onClick={() => void handleUnlink(currentAssets.adAccount!.asset_record_id)}
                           disabled={unlinking}
                           className="text-[10px] text-red-400 hover:text-red-600 flex items-center gap-1 transition-colors"
                         >
@@ -479,7 +567,7 @@ export function MetaClientAssetsModal({
           {!loadingInit && !loadingPages && step === "select" && (
             <>
               {/* Ativos atuais */}
-              {(currentAssets?.facebookPage || currentAssets?.instagramBusiness) && (
+              {(currentAssets?.facebookPage || currentAssets?.instagramBusiness || currentAssets?.adAccount) && (
                 <div className="mb-4 p-3 bg-emerald-50 border border-emerald-100 rounded-xl">
                   <p className="text-[10px] font-bold text-emerald-700 uppercase tracking-wide mb-2">Ativos atuais de {clientName}</p>
                   <div className="space-y-1.5">
@@ -507,6 +595,22 @@ export function MetaClientAssetsModal({
                         </div>
                         <button
                           onClick={() => void handleUnlink(currentAssets.instagramBusiness!.asset_record_id)}
+                          disabled={unlinking}
+                          className="text-[10px] text-red-400 hover:text-red-600 flex items-center gap-1"
+                        >
+                          {unlinking ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
+                          Desvincular
+                        </button>
+                      </div>
+                    )}
+                    {currentAssets.adAccount && (
+                      <div className="flex items-center justify-between text-xs">
+                        <div className="flex items-center gap-2">
+                          <Link2 className="w-3.5 h-3.5 text-indigo-500" />
+                          <span className="text-gray-700 font-medium">{currentAssets.adAccount.name ?? currentAssets.adAccount.id}</span>
+                        </div>
+                        <button
+                          onClick={() => void handleUnlink(currentAssets.adAccount!.asset_record_id)}
                           disabled={unlinking}
                           className="text-[10px] text-red-400 hover:text-red-600 flex items-center gap-1"
                         >
@@ -605,10 +709,43 @@ export function MetaClientAssetsModal({
                   </div>
 
                   <div className="mb-4 p-3 bg-gray-50 border border-gray-100 rounded-xl">
-                    <p className="text-[10px] text-gray-400">
-                      <span className="font-semibold text-gray-500">Conta de anúncio:</span>{" "}
-                      Ainda não disponível nesta conexão.
-                    </p>
+                    <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wide mb-2">Conta de anúncio (opcional)</p>
+                    {currentAssets?.adAccount ? (
+                      <p className="text-xs text-emerald-700 font-medium flex items-center gap-1.5">
+                        <CheckCircle2 className="w-3.5 h-3.5" />
+                        {currentAssets.adAccount.name ?? currentAssets.adAccount.id} · já vinculada
+                      </p>
+                    ) : loadingAdAccounts ? (
+                      <p className="text-xs text-gray-400 flex items-center gap-2">
+                        <Loader2 className="w-3 h-3 animate-spin" /> Consultando contas de anúncio…
+                      </p>
+                    ) : adAccountsError ? (
+                      <p className="text-xs text-amber-600">{adAccountsError}</p>
+                    ) : adAccounts.length === 0 ? (
+                      <p className="text-xs text-gray-400">Nenhuma conta de anúncio encontrada nesta conexão.</p>
+                    ) : (
+                      <div className="flex items-center gap-1.5">
+                        <select
+                          value={selectedAdAccountId ?? ""}
+                          onChange={(e) => setSelectedAdAccountId(e.target.value || null)}
+                          className="flex-1 text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white outline-none focus:border-indigo-400"
+                        >
+                          <option value="">Selecione a conta de anúncio…</option>
+                          {adAccounts.map((a) => (
+                            <option key={a.accountId} value={a.accountId}>
+                              {a.name ?? a.accountId} ({a.currency ?? "—"})
+                            </option>
+                          ))}
+                        </select>
+                        <button
+                          onClick={() => void linkAdAccount()}
+                          disabled={!selectedAdAccountId || adAccountSaving}
+                          className="text-[10px] px-3 py-1.5 bg-indigo-500 text-white rounded-lg disabled:opacity-50 hover:bg-indigo-600 whitespace-nowrap transition-colors"
+                        >
+                          {adAccountSaving ? "Salvando…" : "Vincular"}
+                        </button>
+                      </div>
+                    )}
                   </div>
                 </>
               )}
@@ -639,7 +776,9 @@ export function MetaClientAssetsModal({
                 </div>
                 <div className="flex items-center justify-between px-4 py-3">
                   <span className="text-gray-500 text-xs font-medium">Conta de anúncio</span>
-                  <span className="text-gray-400 text-xs">Não vinculada</span>
+                  <span className="text-gray-400 text-xs">
+                    {currentAssets?.adAccount ? (currentAssets.adAccount.name ?? currentAssets.adAccount.id) : "Não vinculada (vincule depois na tela anterior)"}
+                  </span>
                 </div>
               </div>
             </div>

@@ -107,6 +107,8 @@ type HubAssetsResponse = {
     client_id:          string;
     facebook_page_name: string | null;
     instagram_username: string | null;
+    ad_account_asset_id?: string | null;
+    ad_account_name?:     string | null;
     meta_status:        "complete" | "partial" | "not_connected";
   }>;
 } | null;
@@ -527,6 +529,68 @@ function ConexoesContent() {
   } | null;
   const [adAccounts,        setAdAccounts]        = useState<AdAccountsResponse>(null);
   const [adAccountsLoading, setAdAccountsLoading] = useState(false);
+
+  // Leitura real de campanhas por cliente (PROMPT LKT 16) -- nenhuma rota
+  // lia campanha nenhuma antes desta; listAdAccounts só dava nome de conta.
+  type CampaignsResponse = {
+    ok: boolean; reason?: string; message?: string;
+    account?: { name: string | null; currency: string | null; timezoneName: string | null };
+    period?: { since: string; until: string };
+    queriedAt?: string; total?: number;
+    campaigns?: Array<{
+      id: string; name: string; status: string | null; effectiveStatus: string | null; objective: string | null;
+      hasData: boolean;
+      metrics: {
+        spend: number; impressions: number; reach: number | null; clicks: number;
+        currency: string | null;
+        actions: Array<{ action_type: string; value: string }>;
+        costPerActionType: Array<{ action_type: string; value: string }>;
+      } | null;
+    }>;
+  } | null;
+  function defaultSince() { const d = new Date(); d.setDate(d.getDate() - 6); return d.toISOString().slice(0, 10); }
+  function defaultUntil() { return new Date().toISOString().slice(0, 10); }
+  const [campaignsClientId,      setCampaignsClientId]      = useState("");
+  const [campaignsAdAccount,     setCampaignsAdAccount]     = useState<{ id: string; name: string | null } | null>(null);
+  const [campaignsAdAccountTested, setCampaignsAdAccountTested] = useState(false);
+  const [campaignsSince,         setCampaignsSince]         = useState(defaultSince());
+  const [campaignsUntil,         setCampaignsUntil]         = useState(defaultUntil());
+  const [campaignsResult,        setCampaignsResult]        = useState<CampaignsResponse>(null);
+  const [campaignsLoading,       setCampaignsLoading]       = useState(false);
+
+  async function pickCampaignsClient(clientId: string) {
+    setCampaignsClientId(clientId);
+    setCampaignsResult(null);
+    setCampaignsAdAccount(null);
+    setCampaignsAdAccountTested(false);
+    if (!clientId) return;
+    try {
+      const d = await fetch(`/api/meta/client-assets?client_id=${clientId}`).then((r) => r.json()) as {
+        ok: boolean; assets?: { adAccount: { id: string; name: string | null } | null };
+      };
+      if (d.ok) setCampaignsAdAccount(d.assets?.adAccount ?? null);
+    } catch { /* silent -- campaignsAdAccountTested já cobre o estado de erro */ }
+    finally { setCampaignsAdAccountTested(true); }
+  }
+
+  async function searchCampaigns() {
+    if (!campaignsClientId || !campaignsAdAccount) return;
+    setCampaignsLoading(true);
+    try {
+      const qs = new URLSearchParams({
+        client_id: campaignsClientId,
+        ad_account_id: campaignsAdAccount.id,
+        since: campaignsSince,
+        until: campaignsUntil,
+      }).toString();
+      const d = await fetch(`/api/meta/campaigns?${qs}`).then((r) => r.json()) as CampaignsResponse;
+      setCampaignsResult(d);
+    } catch {
+      setCampaignsResult({ ok: false, reason: "network_error", message: "Erro de rede ao consultar campanhas." });
+    } finally {
+      setCampaignsLoading(false);
+    }
+  }
 
   // Carrega conexões OlaClick do banco no mount
   const loadOlaConnections = useCallback(async () => {
@@ -1119,6 +1183,7 @@ function ConexoesContent() {
                               fbPage:     fb,
                               igAccount:  igUsername ?? null,
                               igUsername: igUsername,
+                              adAccountName: hubItem?.ad_account_name ?? null,
                               ms,
                             };
                           });
@@ -1155,7 +1220,9 @@ function ConexoesContent() {
                                   ? <span>{row.igUsername ? `@${row.igUsername}` : row.igAccount}</span>
                                   : <span className="text-gray-300">—</span>}
                               </td>
-                              <td className="px-3 py-2 text-gray-400 text-[10px] whitespace-nowrap">Indisponível nesta versão</td>
+                              <td className="px-3 py-2 text-gray-600 whitespace-nowrap">
+                                {row.adAccountName ?? <span className="text-gray-300">—</span>}
+                              </td>
                               <td className="px-3 py-2">
                                 <span className={`inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full border ${
                                   row.ms === "complete"      ? "text-emerald-700 bg-emerald-50 border-emerald-100"
@@ -1455,6 +1522,92 @@ function ConexoesContent() {
                   </div>
                 ) : (
                   <p className="text-xs text-gray-500">{adAccounts?.message ?? "Verificando…"}</p>
+                )}
+              </div>
+
+              {/* ── Campanhas e resultados por cliente (PROMPT LKT 16) ──
+                  Leitura real via /api/meta/campaigns -- usa a conta de
+                  anúncio JÁ VINCULADA ao cliente selecionado (client_meta_assets),
+                  nunca "qualquer conta que a conexão acessa". */}
+              <div className="p-3.5 bg-gray-50 border border-gray-100 rounded-xl mb-4">
+                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2 flex items-center gap-1.5">
+                  <BarChart3 className="w-3 h-3" /> Campanhas e resultados por cliente
+                </p>
+                <div className="flex flex-wrap items-end gap-2 mb-3">
+                  <select
+                    value={campaignsClientId}
+                    onChange={(e) => void pickCampaignsClient(e.target.value)}
+                    className="text-xs border border-gray-200 rounded-lg px-2.5 py-1.5 bg-white outline-none focus:border-indigo-400"
+                  >
+                    <option value="">Selecione o cliente…</option>
+                    {olaClients.map((c) => <option key={c.id} value={c.id}>{c.company_name}</option>)}
+                  </select>
+                  <input type="date" value={campaignsSince} onChange={(e) => setCampaignsSince(e.target.value)}
+                    className="text-xs border border-gray-200 rounded-lg px-2.5 py-1.5 bg-white outline-none focus:border-indigo-400" />
+                  <span className="text-xs text-gray-400">até</span>
+                  <input type="date" value={campaignsUntil} onChange={(e) => setCampaignsUntil(e.target.value)}
+                    className="text-xs border border-gray-200 rounded-lg px-2.5 py-1.5 bg-white outline-none focus:border-indigo-400" />
+                  <button
+                    onClick={() => void searchCampaigns()}
+                    disabled={!campaignsClientId || !campaignsAdAccount || campaignsLoading}
+                    className="text-[11px] font-semibold px-3 py-1.5 bg-indigo-600 text-white rounded-lg disabled:opacity-40 hover:bg-indigo-700 transition-colors flex items-center gap-1.5"
+                  >
+                    {campaignsLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <BarChart3 className="w-3 h-3" />}
+                    Buscar campanhas
+                  </button>
+                </div>
+
+                {!campaignsClientId ? (
+                  <p className="text-xs text-gray-400">Selecione um cliente para consultar as campanhas da conta de anúncio vinculada a ele.</p>
+                ) : !campaignsAdAccountTested ? (
+                  <p className="text-xs text-gray-400 flex items-center gap-2"><Loader2 className="w-3 h-3 animate-spin" /> Verificando conta de anúncio vinculada…</p>
+                ) : !campaignsAdAccount ? (
+                  <p className="text-xs text-amber-700">Este cliente ainda não tem conta de anúncio vinculada. Vincule em &quot;Status Meta por cliente&quot; → Gerenciar/Vincular, na seção acima.</p>
+                ) : (
+                  <p className="text-[11px] text-emerald-700 mb-2">Conta vinculada: <span className="font-semibold">{campaignsAdAccount.name ?? campaignsAdAccount.id}</span></p>
+                )}
+
+                {campaignsResult && (
+                  campaignsResult.ok ? (
+                    <div className="mt-2">
+                      <p className="text-[10px] text-gray-400 mb-2">
+                        {campaignsResult.account?.name ?? "Conta"} · {campaignsResult.account?.currency ?? "—"} · fuso {campaignsResult.account?.timezoneName ?? "—"} ·
+                        {" "}período {campaignsResult.period?.since} a {campaignsResult.period?.until} ·
+                        {" "}consultado em {campaignsResult.queriedAt ? new Date(campaignsResult.queriedAt).toLocaleString("pt-BR") : "—"} · Graph API
+                      </p>
+                      {!campaignsResult.campaigns || campaignsResult.campaigns.length === 0 ? (
+                        <p className="text-xs text-gray-500">Nenhuma campanha encontrada nesta conta de anúncio.</p>
+                      ) : (
+                        <div className="space-y-1.5">
+                          {campaignsResult.campaigns.map((c) => (
+                            <div key={c.id} className="bg-white border border-gray-100 rounded-lg px-3 py-2 text-xs">
+                              <div className="flex items-center justify-between">
+                                <span className="font-semibold text-gray-800">{c.name}</span>
+                                <span className="text-[10px] text-gray-400">{c.effectiveStatus ?? c.status ?? "—"} · {c.objective ?? "—"}</span>
+                              </div>
+                              {c.hasData && c.metrics ? (
+                                <div className="mt-1 flex flex-wrap gap-3 text-[11px] text-gray-600">
+                                  <span>Gasto: {c.metrics.spend.toLocaleString("pt-BR", { style: "currency", currency: c.metrics.currency ?? "BRL" })}</span>
+                                  <span>Impressões: {c.metrics.impressions.toLocaleString("pt-BR")}</span>
+                                  {c.metrics.reach != null && <span>Alcance: {c.metrics.reach.toLocaleString("pt-BR")}</span>}
+                                  <span>Cliques: {c.metrics.clicks.toLocaleString("pt-BR")}</span>
+                                  {c.metrics.actions.length > 0 && (
+                                    <span>Resultados: {c.metrics.actions.map((a) => `${a.action_type}: ${a.value}`).join(", ")}</span>
+                                  )}
+                                </div>
+                              ) : (
+                                <p className="mt-1 text-[11px] text-gray-400">Sem dados da Meta para este período.</p>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="mt-2 p-2.5 bg-red-50 border border-red-100 rounded-lg">
+                      <p className="text-xs text-red-700">{campaignsResult.message ?? "Erro ao consultar campanhas."}</p>
+                    </div>
+                  )
                 )}
               </div>
 

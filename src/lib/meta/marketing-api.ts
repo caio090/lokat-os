@@ -133,6 +133,93 @@ export async function listAdAccounts(token: string, options?: GraphOptions): Pro
   }));
 }
 
+// ── Leitura de campanhas + métricas por período (PROMPT LKT 16) ──────────
+// "listAdAccounts" só dava nome da conta; nada no código chamava a edge
+// /campaigns nem /insights em nível de campanha antes desta função.
+
+export async function getAdAccountMeta(accountId: string, token: string, options?: GraphOptions): Promise<AdAccountSummary> {
+  const account = accountId.startsWith("act_") ? accountId : `act_${accountId}`;
+  const opts = { fetchImpl: options?.fetchImpl ?? (fetch as unknown as FetchLike), sleep: options?.sleep ?? defaultSleep, maxRetries: options?.maxRetries ?? 4 };
+  const url = new URL(`https://graph.facebook.com/${options?.version ?? resolveMetaApiVersion()}/${account}`);
+  url.searchParams.set("fields", "account_id,name,currency,timezone_name,account_status");
+  url.searchParams.set("access_token", token);
+  const body = await getJson<never>(url.toString(), opts) as unknown as Record<string, unknown>;
+  return {
+    accountId: String(body.account_id ?? accountId.replace(/^act_/, "")),
+    name: typeof body.name === "string" ? body.name : null,
+    currency: typeof body.currency === "string" ? body.currency : null,
+    timezoneName: typeof body.timezone_name === "string" ? body.timezone_name : null,
+    accountStatus: typeof body.account_status === "number" ? body.account_status : null,
+  };
+}
+
+export interface CampaignSummary {
+  id: string;
+  name: string;
+  status: string | null;
+  effectiveStatus: string | null;
+  objective: string | null;
+}
+
+export async function listCampaigns(accountId: string, token: string, options?: GraphOptions): Promise<CampaignSummary[]> {
+  const account = accountId.startsWith("act_") ? accountId : `act_${accountId}`;
+  const rows = await graphGetAll<Record<string, unknown>>(`${account}/campaigns`, {
+    fields: "id,name,status,effective_status,objective",
+    limit: "200",
+  }, token, options);
+  return rows.map((r) => ({
+    id: String(r.id ?? ""),
+    name: typeof r.name === "string" ? r.name : "(sem nome)",
+    status: typeof r.status === "string" ? r.status : null,
+    effectiveStatus: typeof r.effective_status === "string" ? r.effective_status : null,
+    objective: typeof r.objective === "string" ? r.objective : null,
+  }));
+}
+
+export interface CampaignPeriodMetrics {
+  campaignId: string;
+  spend: number;
+  impressions: number;
+  reach: number | null;
+  clicks: number;
+  linkClicks: number | null;
+  ctr: number | null;
+  currency: string | null;
+  actions: Array<{ action_type: string; value: string }>;
+  costPerActionType: Array<{ action_type: string; value: string }>;
+  dateStart: string;
+  dateStop: string;
+}
+
+/** Métricas agregadas por campanha no período (sem time_increment: 1 linha por campanha). */
+export async function fetchCampaignPeriodMetrics(accountId: string, since: string, until: string, token: string, options?: GraphOptions): Promise<CampaignPeriodMetrics[]> {
+  if (!DATE.test(since) || !DATE.test(until) || since > until) {
+    throw new MetaApiError("parametro_invalido", null, null, "Período inválido (use YYYY-MM-DD, início ≤ fim).");
+  }
+  const account = accountId.startsWith("act_") ? accountId : `act_${accountId}`;
+  const rows = await graphGetAll<Record<string, unknown>>(`${account}/insights`, {
+    level: "campaign",
+    time_range: JSON.stringify({ since, until }),
+    use_unified_attribution_setting: "true",
+    fields: "campaign_id,spend,impressions,reach,clicks,inline_link_clicks,ctr,actions,action_values,cost_per_action_type,account_currency,date_start,date_stop",
+    limit: "500",
+  }, token, options);
+  return rows.map((r) => ({
+    campaignId: String(r.campaign_id ?? ""),
+    spend: num(r.spend),
+    impressions: num(r.impressions),
+    reach: numOrNull(r.reach),
+    clicks: num(r.clicks),
+    linkClicks: numOrNull(r.inline_link_clicks),
+    ctr: numOrNull(r.ctr),
+    currency: typeof r.account_currency === "string" ? r.account_currency : null,
+    actions: actionList(r.actions),
+    costPerActionType: actionList(r.cost_per_action_type),
+    dateStart: String(r.date_start ?? since),
+    dateStop: String(r.date_stop ?? until),
+  }));
+}
+
 export interface InsightsRequest {
   accountId: string;
   level: "account" | "campaign" | "adset" | "ad";

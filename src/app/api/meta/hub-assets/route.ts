@@ -45,7 +45,7 @@ export async function GET() {
 
   const { data: rows, error } = await db
     .from("client_meta_assets")
-    .select("client_id, asset_type, asset_name, username");
+    .select("client_id, asset_type, asset_id, asset_name, username");
 
   if (error?.code === "42P01") {
     // Tabela não existe ainda — retorna vazio sem erro
@@ -56,13 +56,13 @@ export async function GET() {
   }
 
   // Agrupa por client_id
-  const byClient = new Map<string, { fb: string | null; ig: string | null }>();
+  const byClient = new Map<string, { fb: string | null; ig: string | null; adAccountId: string | null; adAccountName: string | null }>();
 
   for (const row of (rows ?? []) as Array<{
-    client_id: string; asset_type: string; asset_name: string | null; username: string | null;
+    client_id: string; asset_type: string; asset_id: string; asset_name: string | null; username: string | null;
   }>) {
     if (!byClient.has(row.client_id)) {
-      byClient.set(row.client_id, { fb: null, ig: null });
+      byClient.set(row.client_id, { fb: null, ig: null, adAccountId: null, adAccountName: null });
     }
     const entry = byClient.get(row.client_id)!;
     if (row.asset_type === "facebook_page" && !entry.fb) {
@@ -71,12 +71,20 @@ export async function GET() {
     if (row.asset_type === "instagram_business" && !entry.ig) {
       entry.ig = row.username ?? row.asset_name;
     }
+    // PROMPT LKT 16: conta de anúncio por cliente -- a linha já existia
+    // aqui (client_meta_assets não filtra por asset_type), só não era lida.
+    if (row.asset_type === "ad_account" && !entry.adAccountId) {
+      entry.adAccountId = row.asset_id;
+      entry.adAccountName = row.asset_name;
+    }
   }
 
-  const items = Array.from(byClient.entries()).map(([client_id, { fb, ig }]) => ({
+  const items = Array.from(byClient.entries()).map(([client_id, { fb, ig, adAccountId, adAccountName }]) => ({
     client_id,
     facebook_page_name:  fb,
     instagram_username:  ig,
+    ad_account_asset_id: adAccountId,
+    ad_account_name:     adAccountName,
     meta_status: (fb && ig) ? "complete" : (fb || ig) ? "partial" : "not_connected",
   }));
 

@@ -5,7 +5,7 @@ import { withMutationProtection } from "@/lib/workspaces/assert-not-preview";
 interface LinkPayload {
   client_id:          string;
   meta_connection_id?: string; // opcional — RPC resolve internamente se omitido
-  asset_type:         "facebook_page" | "instagram_business";
+  asset_type:         "facebook_page" | "instagram_business" | "ad_account";
   asset_id:           string;
   asset_name?:        string;
   username?:          string;
@@ -83,7 +83,10 @@ export const POST = withMutationProtection(async function POST(request: NextRequ
     }, { status: 400 });
   }
 
-  const validTypes = ["facebook_page", "instagram_business"];
+  // ad_account já era aceito por admin_link_meta_asset (SQL 60) e pelo CHECK
+  // de client_meta_assets (SQL 37) -- só esta rota nunca deixava passar
+  // (PROMPT LKT 16: vínculo de conta de anúncio por cliente).
+  const validTypes = ["facebook_page", "instagram_business", "ad_account"];
   if (!validTypes.includes(asset_type)) {
     return NextResponse.json({ ok: false, reason: "invalid_asset_type" }, { status: 400 });
   }

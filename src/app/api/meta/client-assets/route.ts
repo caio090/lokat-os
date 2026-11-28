@@ -69,6 +69,10 @@ export async function GET(request: NextRequest) {
 
   const facebookPage      = assets.find((a) => a.asset_type === "facebook_page")      ?? null;
   const instagramBusiness = assets.find((a) => a.asset_type === "instagram_business") ?? null;
+  // PROMPT LKT 16: "adAccount: null, adAccountStatus: unavailable" eram fixos
+  // -- a query acima já traz linhas asset_type='ad_account' (nunca filtrada
+  // por tipo), só não eram lidas. Nunca houve indisponibilidade real.
+  const adAccount          = assets.find((a) => a.asset_type === "ad_account")        ?? null;
 
   const hasPage      = !!facebookPage;
   const hasInstagram = !!instagramBusiness;
@@ -101,8 +105,13 @@ export async function GET(request: NextRequest) {
         picture_url:     instagramBusiness.picture_url,
         connected_at:    instagramBusiness.connected_at,
       } : null,
-      adAccount:       null,
-      adAccountStatus: "unavailable" as const,
+      adAccount: adAccount ? {
+        asset_record_id: adAccount.id,
+        id:              adAccount.asset_id,
+        name:            adAccount.asset_name,
+        connected_at:    adAccount.connected_at,
+      } : null,
+      adAccountStatus: adAccount ? "linked" as const : "not_linked" as const,
     },
     status,
     allAssets: assets.map((a) => ({
