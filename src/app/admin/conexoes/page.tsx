@@ -748,6 +748,9 @@ function ConexoesContent() {
     } else if (providerParam === "olaclick" && client) {
       setOlaModalClientId(client.id);
       setShowOlaModal(true);
+    } else if (providerParam === "campanhas" && client) {
+      // Deep-link vindo de /admin/empresa (Company Central) -- PROMPT LKT 17.
+      void pickCampaignsClient(client.id);
     }
   }, [providerParam, clientParam, olaClients]);
 

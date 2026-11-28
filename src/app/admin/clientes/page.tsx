@@ -1,6 +1,7 @@
 "use client";
 import { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import Link from "next/link";
 import { PageHeader } from "@/components/page-header";
 import {
   Plus, Search, X, AtSign, CheckCircle2, AlertCircle, Clock,
@@ -833,6 +834,17 @@ function ClientCard({
           <ClientBadges c={c} />
         </div>
         <div className="flex flex-wrap gap-1 flex-shrink-0 justify-end max-w-[180px]">
+          {/* PROMPT LKT 17 (seção 7/10/24) -- a Central da Empresa
+              (/admin/empresa) já reúne jornada, onboarding, projetos,
+              comercial e Meta por cliente, mas nenhuma tela de clientes
+              linkava pra ela: a equipe não sabia que existia. */}
+          <Link
+            href={`/admin/empresa?client=${c.id}`}
+            className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-semibold text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50 transition-colors"
+            title="Abrir central deste cliente (jornada, projetos, Meta, comercial)"
+          >
+            <Building2 className="w-3.5 h-3.5" /> Central
+          </Link>
           <button onClick={() => onInvite(c)} className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] text-gray-500 hover:text-indigo-600 hover:bg-indigo-50 transition-colors" title="Gerar convite">
             <Mail className="w-3.5 h-3.5" /> Convite
           </button>

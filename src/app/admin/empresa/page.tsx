@@ -24,6 +24,7 @@ import { getOnboardingSummary, getOnboardingItems, listOnboardingTemplates } fro
 import { getClientHealthSnapshot } from "@/lib/client-health/adapters";
 import { EmpresaRelationshipPanel } from "./_empresa-relationship-panel";
 import { EmpresaJourneyPanel } from "./_empresa-journey-panel";
+import { EmpresaMetaPanel } from "./_empresa-meta-panel";
 
 /**
  * Sprint MVP Dogfood Spine V0.1 (Bloco D) — Company Central mínima.
@@ -244,6 +245,11 @@ export default async function AdminEmpresaPage({
           Ver todos os projetos <ArrowRight className="w-3.5 h-3.5" />
         </Link>
       </section>
+
+      {/* PROMPT LKT 17 (seção 12/15) -- liga a Central da Empresa aos
+          vínculos e campanhas Meta já reais (PROMPT LKT 14/16), sem
+          duplicar nenhuma tabela ou rota. */}
+      <EmpresaMetaPanel companyId={context.companyId} />
 
       {/* Retomada do produto — Decisões, Próxima Janela, Relacionamento
           Comercial (reunião/proposta pós-venda), Oportunidades, Projetos
